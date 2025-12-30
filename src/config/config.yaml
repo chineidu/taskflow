@@ -1,0 +1,7 @@
+config:
+  rabbitmq_config:
+    max_retries: 3
+    retry_delay: 1
+    connection_timeout: 5
+    heartbeat: 60
+    prefetch_count: 5
