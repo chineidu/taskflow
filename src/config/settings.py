@@ -55,8 +55,15 @@ class Settings(BaseSettingsConfig):
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
     POSTGRES_DB: str = "taskflow_db"
+    API_DB_NAME: str = "users_db"
 
-    @field_validator("PORT", "POSTGRES_PORT", mode="before")
+    # ===== REDIS CACHE =====
+    REDIS_HOST: str = "localhost"
+    REDIS_PORT: int = 6379
+    REDIS_PASSWORD: SecretStr = SecretStr("your_redis_password")
+    REDIS_DB: int = 0
+
+    @field_validator("PORT", "POSTGRES_PORT", "REDIS_PORT", mode="before")
     @classmethod
     def parse_port_fields(cls, v: str | int) -> int:
         """Parses port fields to ensure they are integers."""
@@ -73,6 +80,30 @@ class Settings(BaseSettingsConfig):
 
     @property
     def database_url(self) -> str:
+        """
+        Constructs the database connection URL.
+
+        This is the database used for user authentication and API-specific tables.
+        It's separate from MLflow's database to avoid conflicts.
+
+        Returns
+        -------
+        str
+            Complete database connection URL in the format:
+            postgresql+psycopg2://user:password@host:port/dbname
+        """
+        password: str = quote(self.POSTGRES_PASSWORD.get_secret_value(), safe="")
+        url: str = (
+            f"postgresql+psycopg2://{self.POSTGRES_USER}"
+            f":{password}"
+            f"@{self.POSTGRES_HOST}"
+            f":{self.POSTGRES_PORT}"
+            f"/{self.POSTGRES_DB}"
+        )
+        return url
+
+    @property
+    def database_url2(self) -> str:
         """
         Constructs the API database connection URL.
 
@@ -91,7 +122,7 @@ class Settings(BaseSettingsConfig):
             f":{password}"
             f"@{self.POSTGRES_HOST}"
             f":{self.POSTGRES_PORT}"
-            f"/{self.POSTGRES_DB}"
+            f"/{self.API_DB_NAME}"
         )
         return url
 
@@ -114,6 +145,26 @@ class Settings(BaseSettingsConfig):
             f"/{self.RABBITMQ_VHOST}"
         )
         return url
+
+    @property
+    def redis_url(self) -> str:
+        """
+        Constructs the Redis connection URL.
+
+        Returns
+        -------
+        str
+            Complete Redis connection URL in the format:
+            redis://[:password@]host:port/db
+        """
+        raw_password = self.REDIS_PASSWORD.get_secret_value()
+        if raw_password:
+            password = quote(raw_password, safe="")
+            url: str = f"redis://:{password}@{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+        else:
+            url = f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+        return url
+
 
 def refresh_settings() -> Settings:
     """Refresh environment variables and return new Settings instance.

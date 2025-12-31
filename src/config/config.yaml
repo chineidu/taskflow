@@ -5,3 +5,25 @@ config:
     connection_timeout: 5
     heartbeat: 60
     prefetch_count: 5
+
+  api_config:
+    title: Deep Thinking RAG
+    name: "${.title}"
+    description: API for the Deep Thinking RAG
+    version: v1.0.0
+    status: healthy
+    prefix: /api/v1
+    auth_prefix: "${.prefix}/auth"
+    middleware:
+      cors:
+        allow_origins:
+          - "*"
+        allow_credentials: true
+        allow_methods:
+          - "*"
+        allow_headers:
+          - "*"
+    ratelimit:
+      default_rate: 50
+      burst_rate: 100
+      login_rate: 10

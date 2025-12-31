@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/compose-spec/compose-spec/master/schema/compose-spec.json
 services:
   database:
     image: postgres:17.5-bookworm
@@ -43,8 +44,40 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  # Redis for caching
+  redis:
+    image: redis:8.2.3-bookworm
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+      - type: bind
+        source: ./docker/redis.conf
+        target: /usr/local/etc/redis/redis.conf
+        read_only: true
+    command: redis-server /usr/local/etc/redis/redis.conf
+    healthcheck:
+      test: ["CMD", "redis-cli", "--requirepass", "redis", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # For Redis GUI management
+  redisinsight:
+    image: redis/redisinsight:latest
+    ports:
+      - "5540:5540"
+    depends_on:
+      - redis
+    # Connection URL:
+    # redis://:<password>@<host>:<port>/<db_number>
+    # e.g. redis://:redis@redis:6379/0
+    # Note: Use `redis` instead of `localhost` when connecting from within another container
+
 # Named volumes ONLY!
 # Persist data outside the lifecycle of the container.
 volumes:
   taskflow-db-volume:
   rabbitmq-data:
+  redis-data:
