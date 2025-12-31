@@ -19,5 +19,5 @@ class RabbitMQPayload:
 
 @dataclass(slots=True, kw_only=True)
 class SubmittedJobResult:
-    task_id: str = field(metadata={"description": "The unique identifier for the submitted job"})
+    task_ids: list[str] = field(metadata={"description": "The unique identifiers for the submitted jobs."})
     number_of_messages: int = field(metadata={"description": "The number of messages submitted for the job"})

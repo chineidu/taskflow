@@ -28,7 +28,15 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         """Add a unique request ID to the request and response headers."""
-        request_id = str(uuid4())
+        # Check for existing request ID from client
+        client_req_id: str | None = request.headers.get("X-Request-ID", None)
+
+        if client_req_id and len(client_req_id) <= 128:
+            request_id = client_req_id.strip()
+        else:
+            # Generate a new UUID if not provided or invalid
+            request_id = str(uuid4())
+
         request.state.request_id = request_id
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id

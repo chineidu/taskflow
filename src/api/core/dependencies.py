@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
 from aiocache import Cache
-from fastapi import Request
+from fastapi import Header, Request
 
 from src.api.core.exceptions import ResourcesNotFoundError
 from src.schemas.types import ResourceEnum
@@ -21,6 +21,18 @@ async def get_cache(request: Request) -> Cache:
     if not hasattr(request.app.state, "cache") or request.app.state.cache is None:
         raise ResourcesNotFoundError(resource_type=ResourceEnum.CACHE)
     return request.app.state.cache
+
+
+async def request_id_header_doc(
+    x_request_id: str | None = Header(  # noqa: ARG001
+        default=None,
+        alias="X-Request-ID",
+        description="Optional request ID. If provided, it will be reused; otherwise generated.",
+        example="my-trace-001",
+    ),
+) -> None:
+    """Dependency to document the X-Request-ID header in OpenAPI."""
+    return
 
 
 def get_executor(max_workers: int | None = None) -> ThreadPoolExecutor:

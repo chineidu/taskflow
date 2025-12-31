@@ -70,15 +70,25 @@ class RabbitMQConsumer(BaseRabbitMQ):
                         logger.info("[+] Shutdown detected, breaking message loop")
                         break
 
+                    task_id: str = "unknown"
                     try:
                         async with message.process(
                             requeue=False,
                             reject_on_redelivered=False,
                             ignore_processed=False,
                         ):
+                            # Extract metadata for logging
+                            task_id = str(message.headers.get("task_id", "unknown"))
+                            correlation_id: str = message.correlation_id or "unknown"
+                            timestamp = message.timestamp
+
+                            logger.info(
+                                f"[+] Received message | task_id={task_id} | "
+                                f"correlation_id={correlation_id} | timestamp={timestamp}"
+                            )
                             # Deserialize message
                             try:
-                                message_body = message.body.decode()
+                                message_body: str = message.body.decode()
                                 message_dict = json.loads(message_body)
 
                             except (json.JSONDecodeError, UnicodeDecodeError) as e:
@@ -89,17 +99,20 @@ class RabbitMQConsumer(BaseRabbitMQ):
                                 continue
 
                             # Call the provided callback
+                            logger.info(f"[+] Processing task_id={task_id}")
                             if asyncio.iscoroutinefunction(callback):
                                 await callback(message_dict)
                             else:
                                 callback(message_dict)
+
+                            logger.info(f"[+] Completed task_id={task_id}")
 
                     except asyncio.CancelledError:
                         logger.info("[+] Message processing cancelled")
                         raise
 
                     except Exception as e:
-                        logger.error(f"Error processing message: {e}")
+                        logger.error(f"[-] Error processing task_id={task_id}: {e}")
 
             logger.info("[+] Exiting consume loop")
 
@@ -119,12 +132,12 @@ async def example_consumer_callback(message: RabbitMQPayload) -> None:
         The deserialized message payload.
     """
     # Simulate processing
-    await asyncio.sleep(1)
+    await asyncio.sleep(0.2)
     logger.info(f"Processing message: {message}")
 
 
-async def main() -> None:
-    """Example usage of the production-ready consumer."""
+async def run_worker() -> None:
+    """Example usage of the consumer."""
     from src.config import app_config
 
     consumer = RabbitMQConsumer(app_config)
@@ -174,7 +187,7 @@ async def main() -> None:
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        asyncio.run(run_worker())
         logger.info("[+] Exiting gracefully")
 
     except KeyboardInterrupt:

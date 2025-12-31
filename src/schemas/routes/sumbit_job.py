@@ -34,7 +34,7 @@ class InputSchema(BaseSchema):
 class JobSubmissionResponseSchema(BaseSchema):
     """Schema for job submission response."""
 
-    task_id: str = Field(description="The unique identifier for the submitted job.")
+    task_ids: list[str] = Field(description="The unique identifiers for the submitted jobs.")
     number_of_messages: int = Field(default=0, description="The number of messages submitted for the job.")
     status: TaskStatusEnum = Field(
         default=TaskStatusEnum.PENDING, description="The status of the job submission."

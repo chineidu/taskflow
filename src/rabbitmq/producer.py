@@ -1,6 +1,7 @@
 import json
 from datetime import datetime
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 import aio_pika
 
@@ -43,9 +44,9 @@ class RabbitMQProducer(BaseRabbitMQ):
         message: RabbitMQPayload,
         queue_name: str,
         routing_key: str | None = None,
-        correlation_id: str | None = None,
+        request_id: str | None = None,
         durable: bool = True,
-    ) -> bool:
+    ) -> tuple[bool, str]:
         """Publish a message to the specified RabbitMQ queue.
 
         Parameters
@@ -56,23 +57,24 @@ class RabbitMQProducer(BaseRabbitMQ):
             The name of the target RabbitMQ queue.
         routing_key : str, optional
             The routing key for the message, by default None.
-        correlation_id : str, optional
-            The correlation ID for the message for tracking, by default None.
+        request_id : str, optional
+            The request ID for the message for tracking, by default None.
         durable : bool, optional
             Whether the queue should be durable, by default True.
 
         Returns
         -------
-        bool
-            True if the message was published successfully, False otherwise.
+        tuple[bool, str]
+            Tuple indicating success status and task ID.
         """
         routing_key = routing_key or queue_name
         delivery_mode = aio_pika.DeliveryMode.PERSISTENT if durable else aio_pika.DeliveryMode.NOT_PERSISTENT
         timestamp = datetime.now()
+        task_id = str(uuid4())
 
         if self.channel is None:
             logger.error("[-] Cannot publish message: Channel is not established")
-            return False
+            return (False, "")
 
         try:
             # Create and publish the message
@@ -81,34 +83,35 @@ class RabbitMQProducer(BaseRabbitMQ):
                 body=body,
                 content_type="application/json",
                 delivery_mode=delivery_mode,
-                correlation_id=correlation_id,
+                correlation_id=request_id,
                 timestamp=timestamp,
+                headers={"task_id": task_id},
             )
             await self.channel.default_exchange.publish(rabbitmq_message, routing_key=routing_key)
 
             logger.info(f"[+] Published message to queue '{queue_name}': {message}")
-            return True
+            return (True, task_id)
 
         except aio_pika.exceptions.AMQPException as e:
             logger.error(f"[-] AMQP error while publishing to queue '{queue_name}': {e}")
-            return False
+            return (False, "")
 
         except (json.JSONDecodeError, TypeError, UnicodeEncodeError) as e:
             logger.error(f"[-] Serialization error while publishing to queue '{queue_name}': {e}")
-            return False
+            return (False, "")
 
         except Exception as e:
             logger.error(f"[-] Failed to publish message to queue '{queue_name}': {e}")
-            return False
+            return (False, "")
 
     async def abatch_publish(
         self,
         messages: list[RabbitMQPayload],
         queue_name: str,
         routing_key: str | None = None,
-        correlation_id: str | None = None,
+        request_id: str | None = None,
         durable: bool = True,
-    ) -> int:
+    ) -> tuple[int, list[str]]:
         """Publish a batch of messages to RabbitMQ.
 
         Parameters
@@ -119,34 +122,36 @@ class RabbitMQProducer(BaseRabbitMQ):
             The name of the target RabbitMQ queue.
         routing_key : str | None, optional
             The routing key for the message, by default None
-        correlation_id : str | None, optional
-            The correlation ID for the message for tracking, by default None
+        request_id : str | None, optional
+            The request ID for the message for tracking, by default None
         durable : bool, optional
             Whether the queue should be durable, by default True
 
         Returns
         -------
-        int
-            Number of messages successfully published.
+        tuple[int, list[str]]
+            Tuple containing the number of successfully sent messages and their task IDs.
+
         """
         messages_sent: int = 0
+        task_ids: list[str] = []
 
         for idx, msg in enumerate(messages):
             try:
-                success = await self.apublish(
+                (success, task_id) = await self.apublish(
                     message=msg,
                     queue_name=queue_name,
                     routing_key=routing_key,
-                    correlation_id=correlation_id,
+                    request_id=request_id,
                     durable=durable,
                 )
                 if success:
                     messages_sent += 1
+                    task_ids.append(task_id)
+
             except Exception as e:
                 logger.error(f"Failed to publish message {idx} in batch: {e}")
+                continue
 
         logger.info(f"Batch publish completed: {messages_sent}/{len(messages)} messages sent")
-        return messages_sent
-
-
-
+        return (messages_sent, task_ids)
