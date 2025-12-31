@@ -1,7 +1,7 @@
 from enum import StrEnum
 
 
-class Environment(StrEnum):
+class EnvironmentEnum(StrEnum):
     DEVELOPMENT = "development"
     PRODUCTION = "production"
 
@@ -15,9 +15,16 @@ class ErrorCodeEnum(StrEnum):
     UNEXPECTED_ERROR = "unexpected_error"
 
 
-class ResourcesType(StrEnum):
+class ResourceEnum(StrEnum):
     """The type of resource to use."""
 
     CACHE = "cache"
     DATABASE = "database"
     RATE_LIMITER = "rate_limiter"
+
+
+class TaskStatusEnum(StrEnum):
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"

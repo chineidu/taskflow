@@ -4,7 +4,6 @@ from typing import Any
 
 @dataclass(slots=True, kw_only=True)
 class RabbitMQPayload:
-    task_type: str = field(metadata={"description": "Type of the task to be processed"})
     payload: dict[str, Any] = field(metadata={"description": "Payload data for the task"})
 
     def to_dict(self) -> dict[str, Any]:
@@ -16,3 +15,9 @@ class RabbitMQPayload:
             Dictionary representation of the RabbitMQPayload.
         """
         return asdict(self)
+
+
+@dataclass(slots=True, kw_only=True)
+class SubmittedJobResult:
+    task_id: str = field(metadata={"description": "The unique identifier for the submitted job"})
+    number_of_messages: int = field(metadata={"description": "The number of messages submitted for the job"})

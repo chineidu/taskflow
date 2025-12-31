@@ -6,7 +6,7 @@ from pydantic import SecretStr
 from pydantic.functional_validators import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from src.schemas.types import Environment
+from src.schemas.types import EnvironmentEnum
 
 
 class BaseSettingsConfig(BaseSettings):
@@ -35,7 +35,7 @@ class Settings(BaseSettingsConfig):
     """Application settings class containing database and other credentials."""
 
     # ===== API SERVER =====
-    ENVIRONMENT: Environment = Environment.DEVELOPMENT
+    ENVIRONMENT: EnvironmentEnum = EnvironmentEnum.DEVELOPMENT
     HOST: str = "0.0.0.0"
     PORT: int = 8000
     WORKERS: int = 1

@@ -7,9 +7,9 @@ config:
     prefetch_count: 5
 
   api_config:
-    title: Deep Thinking RAG
+    title: TaskFlow API
     name: "${.title}"
-    description: API for the Deep Thinking RAG
+    description: A Learning-Focused Task Queue System API
     version: v1.0.0
     status: healthy
     prefix: /api/v1

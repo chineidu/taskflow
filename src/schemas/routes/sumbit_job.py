@@ -1,0 +1,57 @@
+from pydantic import ConfigDict, Field, field_validator
+
+from src import create_logger
+from src.schemas.base import BaseSchema
+from src.schemas.rabbitmq.payload import RabbitMQPayload
+from src.schemas.types import TaskStatusEnum
+
+logger = create_logger(name="schemas.submit_job")
+
+
+class InputSchema(BaseSchema):
+    """Schema for job submission input."""
+
+    task_type: str | None = Field(default=None, description="The type of the job to be processed.")
+    queue_name: str | None = Field(default=None, description="The name of the queue to submit the job to.")
+    data: list[RabbitMQPayload] = Field(
+        default_factory=list, description="List of payloads for the job submission."
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "task_type": "data_processing",
+                "queue_name": "test_queue",
+                "data": [
+                    {"payload": {"key1": "value1", "key2": "value2"}},
+                    {"payload": {"keyA": "valueA", "keyB": "valueB"}},
+                ],
+            }
+        }
+    )
+
+
+class JobSubmissionResponseSchema(BaseSchema):
+    """Schema for job submission response."""
+
+    task_id: str = Field(description="The unique identifier for the submitted job.")
+    number_of_messages: int = Field(default=0, description="The number of messages submitted for the job.")
+    status: TaskStatusEnum = Field(
+        default=TaskStatusEnum.PENDING, description="The status of the job submission."
+    )
+
+    @field_validator("status", mode="after")
+    @classmethod
+    def validate_status(cls, v: TaskStatusEnum | str) -> str:
+        """Convert TaskStatusEnum to its string representation."""
+        if isinstance(v, TaskStatusEnum):
+            return v.value
+
+        if isinstance(v, str):
+            return v
+
+        # Otherwise, log a warning and return a default value
+        logger.warning(
+            f"Invalid TaskStatusEnum value: {v!r}. Defaulting to {TaskStatusEnum.PENDING.value!r}."
+        ) 
+        return TaskStatusEnum.PENDING.value

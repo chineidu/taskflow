@@ -39,4 +39,4 @@ async def health_check(
         
     except Exception as e:
         logger.error(f"Unexpected error during health check: {e}")
-        raise UnexpectedError(details="Unexpected error occurred while performing hybrid search.") from e
+        raise UnexpectedError(details="Unexpected error occurred while performing health check.") from e
