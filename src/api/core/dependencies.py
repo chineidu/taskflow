@@ -6,7 +6,7 @@ from aiocache import Cache
 from fastapi import Request
 
 from src.api.core.exceptions import ResourcesNotFoundError
-from src.schemas.types import ResourcesType
+from src.schemas.types import ResourceEnum
 
 if TYPE_CHECKING:
     pass
@@ -19,7 +19,7 @@ _executor_lock = threading.Lock()
 async def get_cache(request: Request) -> Cache:
     """Dependency to inject cache into endpoints."""
     if not hasattr(request.app.state, "cache") or request.app.state.cache is None:
-        raise ResourcesNotFoundError(resource_type=ResourcesType.CACHE)
+        raise ResourcesNotFoundError(resource_type=ResourceEnum.CACHE)
     return request.app.state.cache
 
 

@@ -2,7 +2,7 @@
 
 from fastapi import status
 
-from src.schemas.types import ErrorCodeEnum, ResourcesType
+from src.schemas.types import ErrorCodeEnum, ResourceEnum
 
 
 class BaseAPIError(Exception):
@@ -49,18 +49,18 @@ class HTTPError(BaseAPIError):
 class ResourcesNotFoundError(BaseAPIError):
     """Exception raised when a requested resource is not found."""
 
-    def __init__(self, resource_type: str | ResourcesType | None = None) -> None:
+    def __init__(self, resource_type: str | ResourceEnum | None = None) -> None:
         """Initialize the exception with a human-readable resource name.
 
         Accepts either a ResourcesType enum member, a string name (which will
         be resolved to an enum value if possible), or None.
         """
 
-        if isinstance(resource_type, ResourcesType):
+        if isinstance(resource_type, ResourceEnum):
             resource_name = str(resource_type.value)
         elif isinstance(resource_type, str):
             try:
-                resource_name = str(ResourcesType(resource_type).value)
+                resource_name = str(ResourceEnum(resource_type).value)
             except Exception:
                 resource_name = resource_type
         else:

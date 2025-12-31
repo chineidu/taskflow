@@ -103,7 +103,7 @@ class RabbitMQProducer(BaseRabbitMQ):
 
     async def abatch_publish(
         self,
-        message: list[RabbitMQPayload],
+        messages: list[RabbitMQPayload],
         queue_name: str,
         routing_key: str | None = None,
         correlation_id: str | None = None,
@@ -113,7 +113,7 @@ class RabbitMQProducer(BaseRabbitMQ):
 
         Parameters
         ----------
-        message : list[RabbitMQPayload]
+        messages : list[RabbitMQPayload]
             List of message payloads to be sent.
         queue_name : str
             The name of the target RabbitMQ queue.
@@ -131,7 +131,7 @@ class RabbitMQProducer(BaseRabbitMQ):
         """
         messages_sent: int = 0
 
-        for idx, msg in enumerate(message):
+        for idx, msg in enumerate(messages):
             try:
                 success = await self.apublish(
                     message=msg,
@@ -145,22 +145,8 @@ class RabbitMQProducer(BaseRabbitMQ):
             except Exception as e:
                 logger.error(f"Failed to publish message {idx} in batch: {e}")
 
-        logger.info(f"Batch publish completed: {messages_sent}/{len(message)} messages sent")
+        logger.info(f"Batch publish completed: {messages_sent}/{len(messages)} messages sent")
         return messages_sent
 
 
-if __name__ == "__main__":
-    import asyncio
 
-    from src.config import app_config
-
-    async def main():
-        producer = RabbitMQProducer(config=app_config)
-        await producer.aensure_queue(queue_name="test_queue", durable=True)
-        async with producer.aconnection_context():
-
-            test_message = RabbitMQPayload(task_type="test", payload={"data": "Hello, RabbitMQ!"})
-            await producer.apublish(message=test_message, queue_name="test_queue")
-
-            
-    asyncio.run(main())
