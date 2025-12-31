@@ -40,7 +40,7 @@ class BaseRabbitMQ:
         self.channel: aio_pika.Channel | None = None
         self._lock = asyncio.Lock()
 
-    async def connect(self) -> None:
+    async def aconnect(self) -> None:
         """Establish connection to RabbitMQ."""
         # Fast path: already connected
         if self.connection is not None and not self.connection.is_closed:
@@ -76,18 +76,19 @@ class BaseRabbitMQ:
                     return
 
                 except aio_pika.exceptions.AMQPException as e:
-                    logger.warning(
-                        f"[-] Connection attempt {attempt + 1} failed: {e}. "
-                        f"Retrying in {self.config.rabbitmq_config.retry_delay}s..."
-                    )
                     if attempt < self.config.rabbitmq_config.max_retries - 1:
-                        await asyncio.sleep(self.config.rabbitmq_config.retry_delay)
+                        # Exponential backoff before retrying
+                        delay = self.config.rabbitmq_config.retry_delay * (2**attempt)
+                        logger.warning(
+                            f"[-] Connection attempt {attempt + 1} failed: {e}. Retrying in {delay}s..."
+                        )
+                        await asyncio.sleep(delay)
                     else:
                         # All retries exhausted
                         logger.error("[-] Failed to connect to RabbitMQ after all retries")
                         raise
 
-    async def disconnect(self) -> None:
+    async def adisconnect(self) -> None:
         """Close the connection to RabbitMQ."""
         if self.connection is not None and not self.connection.is_closed:
             try:
@@ -110,7 +111,7 @@ class BaseRabbitMQ:
         """
         return self.connection is not None and not self.connection.is_closed
 
-    async def ensure_queue(
+    async def aensure_queue(
         self,
         queue_name: str,
         durable: bool = True,
@@ -130,11 +131,11 @@ class BaseRabbitMQ:
             The declared queue.
         """
         if self.channel is None:
-            logger.error("[-] Cannot ensure queue: Channel is not established")
-            await self.connect()
+            logger.debug("Channel not established, connecting...")
+            await self.aconnect()
 
         if self.channel is None:
-            raise RuntimeError("Failed to establish channel connection")
+            raise RuntimeError("[-] Failed to establish channel connection")
 
         try:
             queue = await self.channel.declare_queue(queue_name, durable=durable)
@@ -146,7 +147,7 @@ class BaseRabbitMQ:
             raise
 
     @asynccontextmanager
-    async def connection_context(self) -> AsyncGenerator[None, None]:
+    async def aconnection_context(self) -> AsyncGenerator[None, None]:
         """Async context manager for RabbitMQ connection.
 
         Yields
@@ -162,8 +163,8 @@ class BaseRabbitMQ:
                 await producer.publish(message, queue_name)
         """
         try:
-            await self.connect()
+            await self.aconnect()
             yield
 
         finally:
-            await self.disconnect()
+            await self.adisconnect()

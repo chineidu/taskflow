@@ -1,23 +1,26 @@
 import json
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import aio_pika
 
 from src import create_logger
+from src.config import app_settings
 from src.rabbitmq.base import BaseRabbitMQ
+from src.schemas.rabbitmq.payload import RabbitMQPayload
 
 if TYPE_CHECKING:
     from src.config.config import AppConfig
 
 
 logger = create_logger("producer")
+RABBITMQ_URL: str = app_settings.rabbitmq_url
 
 
 class RabbitMQProducer(BaseRabbitMQ):
     """RabbitMQ message producer with connection management and error handling."""
 
-    def __init__(self, config: "AppConfig", url: str) -> None:
+    def __init__(self, config: "AppConfig", url: str = RABBITMQ_URL) -> None:
         """Initialize the producer with configuration.
 
         Parameters
@@ -35,9 +38,9 @@ class RabbitMQProducer(BaseRabbitMQ):
         # Initialize the base class
         super().__init__(config, url)
 
-    async def publish(
+    async def apublish(
         self,
-        message: dict[str, Any],
+        message: RabbitMQPayload,
         queue_name: str,
         routing_key: str | None = None,
         correlation_id: str | None = None,
@@ -47,7 +50,7 @@ class RabbitMQProducer(BaseRabbitMQ):
 
         Parameters
         ----------
-        message : dict[str, Any]
+        message : RabbitMQPayload
             The message payload to be sent.
         queue_name : str
             The name of the target RabbitMQ queue.
@@ -73,7 +76,7 @@ class RabbitMQProducer(BaseRabbitMQ):
 
         try:
             # Create and publish the message
-            body = json.dumps(message).encode()
+            body = json.dumps(message.to_dict()).encode()
             rabbitmq_message = aio_pika.Message(
                 body=body,
                 content_type="application/json",
@@ -98,9 +101,9 @@ class RabbitMQProducer(BaseRabbitMQ):
             logger.error(f"[-] Failed to publish message to queue '{queue_name}': {e}")
             return False
 
-    async def batch_publish(
+    async def abatch_publish(
         self,
-        message: list[dict[str, Any]],
+        message: list[RabbitMQPayload],
         queue_name: str,
         routing_key: str | None = None,
         correlation_id: str | None = None,
@@ -110,7 +113,7 @@ class RabbitMQProducer(BaseRabbitMQ):
 
         Parameters
         ----------
-        message : list[dict[str, Any]]
+        message : list[RabbitMQPayload]
             List of message payloads to be sent.
         queue_name : str
             The name of the target RabbitMQ queue.
@@ -130,7 +133,7 @@ class RabbitMQProducer(BaseRabbitMQ):
 
         for idx, msg in enumerate(message):
             try:
-                success = await self.publish(
+                success = await self.apublish(
                     message=msg,
                     queue_name=queue_name,
                     routing_key=routing_key,
@@ -144,3 +147,20 @@ class RabbitMQProducer(BaseRabbitMQ):
 
         logger.info(f"Batch publish completed: {messages_sent}/{len(message)} messages sent")
         return messages_sent
+
+
+if __name__ == "__main__":
+    import asyncio
+
+    from src.config import app_config
+
+    async def main():
+        producer = RabbitMQProducer(config=app_config)
+        await producer.aensure_queue(queue_name="test_queue", durable=True)
+        async with producer.aconnection_context():
+
+            test_message = RabbitMQPayload(task_type="test", payload={"data": "Hello, RabbitMQ!"})
+            await producer.apublish(message=test_message, queue_name="test_queue")
+
+            
+    asyncio.run(main())
