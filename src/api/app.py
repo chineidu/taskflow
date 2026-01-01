@@ -1,3 +1,5 @@
+"""Application factory for FastAPI app instance."""
+
 import sys
 import warnings
 
@@ -6,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.api.core.lifespan import lifespan
 from src.api.core.middleware import (
@@ -23,6 +26,18 @@ from src.api.routes import (
 from src.config import app_config, app_settings
 
 warnings.filterwarnings("ignore")
+
+# ===== Define the stack of middleware =====
+# REQUEST FLOW:
+# RequestIDMiddleware (Outermost) -> LoggingMiddleware -> ErrorHandlingMiddleware -> [Endpoint]
+#
+# RESPONSE FLOW:
+# [Endpoint] -> ErrorHandlingMiddleware -> LoggingMiddleware -> RequestIDMiddleware (Outermost)
+MIDDLEWARE_STACK: list[type[BaseHTTPMiddleware]] = [
+    RequestIDMiddleware,  # 1. Touches request first
+    LoggingMiddleware,  # 2. Touches request second
+    ErrorHandlingMiddleware,  # 3. Touches request third (closest to route)
+]
 
 
 def create_application() -> FastAPI:
@@ -57,10 +72,9 @@ def create_application() -> FastAPI:
         allow_headers=app_config.api_config.middleware.cors.allow_headers,
     )
 
-    # Add custom middleware
-    app.add_middleware(ErrorHandlingMiddleware)  # type: ignore
-    app.add_middleware(LoggingMiddleware)  # type: ignore
-    app.add_middleware(RequestIDMiddleware)  # type: ignore
+    # Add custom middleware (LIFO: Last In, First Out for requests)
+    for mdlware in reversed(MIDDLEWARE_STACK):
+        app.add_middleware(mdlware)
 
     # Include routers
     # app.include_router(admin.router, prefix=prefix)

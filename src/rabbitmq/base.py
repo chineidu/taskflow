@@ -69,7 +69,9 @@ class BaseRabbitMQ:
 
                     # Set prefetch count
                     if self.channel is not None:
-                        await self.channel.set_qos(prefetch_count=self.config.rabbitmq_config.prefetch_count)
+                        await self.channel.set_qos(
+                            prefetch_count=self.config.rabbitmq_config.prefetch_count
+                        )
 
                     if await self._is_connected():
                         logger.info("[+] Successfully connected to RabbitMQ")
@@ -85,7 +87,9 @@ class BaseRabbitMQ:
                         await asyncio.sleep(delay)
                     else:
                         # All retries exhausted
-                        logger.error("[-] Failed to connect to RabbitMQ after all retries")
+                        logger.error(
+                            "[-] Failed to connect to RabbitMQ after all retries"
+                        )
                         raise
 
     async def adisconnect(self) -> None:

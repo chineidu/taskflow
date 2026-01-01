@@ -11,7 +11,8 @@ from src import ROOT
 class RabbitMQConfig:
     max_retries: int = field(default=3, metadata={"description": "Maximum number of connection retries"})
     retry_delay: int = field(
-        default=1, metadata={"description": "Delay between connection retries in seconds"}
+        default=1,
+        metadata={"description": "Delay between connection retries in seconds"},
     )
     connection_timeout: int = field(default=5, metadata={"description": "Connection timeout in seconds"})
     heartbeat: int = field(default=60, metadata={"description": "Heartbeat interval in seconds"})
@@ -65,13 +66,36 @@ class APIConfig:
     ratelimit: Ratelimit = field(metadata={"description": "Ratelimit configuration."})
 
 
+@dataclass(slots=True, kw_only=True)
+class DatabaseConfig:
+    """Database configuration class."""
+
+    pool_size: int = field(default=30, metadata={"description": "Number of connections to keep in pool"})
+    max_overflow: int = field(default=10, metadata={"description": "Number of extra connections allowed"})
+    pool_timeout: int = field(default=20, metadata={"description": "Seconds to wait for a connection"})
+    pool_recycle: int = field(
+        default=1800,
+        metadata={"description": "Seconds after which to recycle connections"},
+    )
+    pool_pre_ping: bool = field(
+        default=True, metadata={"description": "Whether to test connections before use"}
+    )
+    expire_on_commit: bool = field(
+        default=False, metadata={"description": "Whether to expire objects on commit"}
+    )
+
+
 class AppConfig(BaseModel):
     """Application configuration with validation."""
 
     rabbitmq_config: RabbitMQConfig = Field(
-        default_factory=RabbitMQConfig, description="Configuration settings for RabbitMQ connection"
+        default_factory=RabbitMQConfig,
+        description="Configuration settings for RabbitMQ connection",
     )
-    api_config: APIConfig = Field(description="Configuration settings for the API"
+    api_config: APIConfig = Field(description="Configuration settings for the API")
+    database_config: DatabaseConfig = Field(
+        default_factory=DatabaseConfig,
+        description="Configuration settings for the Database connection",
     )
 
 

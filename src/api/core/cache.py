@@ -59,7 +59,9 @@ def setup_cache() -> Cache:
         return Cache(Cache.MEMORY, serializer=JsonSerializer(), namespace="main")  # type: ignore
 
 
-def cached(ttl: int = 300, key_prefix: str = "") -> Callable[[CacheDecorator], CacheDecorator]:
+def cached(
+    ttl: int = 300, key_prefix: str = ""
+) -> Callable[[CacheDecorator], CacheDecorator]:
     """
     Decorator for caching endpoint responses.
 
@@ -89,7 +91,9 @@ def cached(ttl: int = 300, key_prefix: str = "") -> Callable[[CacheDecorator], C
             # Generate cache key from endpoint path and query params
             if request is None:
                 raise ValueError("Request object is required for caching")
-            cache_key: str = _generate_cache_key(request.url.path, dict(request.query_params), key_prefix)
+            cache_key: str = _generate_cache_key(
+                request.url.path, dict(request.query_params), key_prefix
+            )
 
             # Try to get from cache
             cached_response = await cache.get(cache_key)  # type: ignore
@@ -180,4 +184,6 @@ async def invalidate_cache(cache: Cache, pattern: str | None = None) -> None:
         else:
             await cache.clear()  # type: ignore
     except AttributeError:
-        logger.warning("Cache backend does not support clear operation for the given pattern.")
+        logger.warning(
+            "Cache backend does not support clear operation for the given pattern."
+        )

@@ -24,10 +24,13 @@ async def health_check(
 ) -> HealthStatusSchema:
     """Route for health checks"""
     try:
+        db_available = getattr(request.app.state, "db_available", False)
+
         response = HealthStatusSchema(
             name=app_config.api_config.title,
             status=app_config.api_config.status,
             version=app_config.api_config.version,
+            database_available=db_available,
         )
 
         if not response:
@@ -36,7 +39,7 @@ async def health_check(
             )
 
         return response
-        
+
     except Exception as e:
         logger.error(f"Unexpected error during health check: {e}")
         raise UnexpectedError(details="Unexpected error occurred while performing health check.") from e

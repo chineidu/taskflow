@@ -11,8 +11,12 @@ logger = create_logger(name="schemas.submit_job")
 class InputSchema(BaseSchema):
     """Schema for job submission input."""
 
-    task_type: str | None = Field(default=None, description="The type of the job to be processed.")
-    queue_name: str | None = Field(default=None, description="The name of the queue to submit the job to.")
+    task_type: str | None = Field(
+        default=None, description="The type of the job to be processed."
+    )
+    queue_name: str | None = Field(
+        default=None, description="The name of the queue to submit the job to."
+    )
     data: list[RabbitMQPayload] = Field(
         default_factory=list, description="List of payloads for the job submission."
     )
@@ -34,8 +38,12 @@ class InputSchema(BaseSchema):
 class JobSubmissionResponseSchema(BaseSchema):
     """Schema for job submission response."""
 
-    task_ids: list[str] = Field(description="The unique identifiers for the submitted jobs.")
-    number_of_messages: int = Field(default=0, description="The number of messages submitted for the job.")
+    task_ids: list[str] = Field(
+        description="The unique identifiers for the submitted jobs."
+    )
+    number_of_messages: int = Field(
+        default=0, description="The number of messages submitted for the job."
+    )
     status: TaskStatusEnum = Field(
         default=TaskStatusEnum.PENDING, description="The status of the job submission."
     )
@@ -53,5 +61,5 @@ class JobSubmissionResponseSchema(BaseSchema):
         # Otherwise, log a warning and return a default value
         logger.warning(
             f"Invalid TaskStatusEnum value: {v!r}. Defaulting to {TaskStatusEnum.PENDING.value!r}."
-        ) 
+        )
         return TaskStatusEnum.PENDING.value

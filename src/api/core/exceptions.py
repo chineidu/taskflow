@@ -37,7 +37,9 @@ class UnauthorizedError(BaseAPIError):
 class HTTPError(BaseAPIError):
     """Exception raised for HTTP error."""
 
-    def __init__(self, details: str, status_code: int = status.HTTP_503_SERVICE_UNAVAILABLE) -> None:
+    def __init__(
+        self, details: str, status_code: int = status.HTTP_503_SERVICE_UNAVAILABLE
+    ) -> None:
         message = f"HTTP error: {details}"
         super().__init__(
             message,

@@ -49,4 +49,6 @@ async def submit_job(
 
     except Exception as e:
         logger.error(f"Unexpected error during job submission: {e}")
-        raise UnexpectedError(details="Unexpected error occurred while submitting job.") from e
+        raise UnexpectedError(
+            details="Unexpected error occurred while submitting job."
+        ) from e

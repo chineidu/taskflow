@@ -23,7 +23,9 @@ class APIUser(FastHttpUser):
     @task(3)
     def health_check(self):
         """Health check endpoint - weighted 3x."""
-        with self.client.get("/health", catch_response=True, name="GET /health") as response:
+        with self.client.get(
+            "/health", catch_response=True, name="GET /health"
+        ) as response:
             if response.status_code == 200:
                 response.success()
             else:
@@ -32,7 +34,10 @@ class APIUser(FastHttpUser):
     @task(7)
     def submit_job_normal(self):
         """Submit normal job - weighted 7x (more common)."""
-        payload = {"data": self._generate_messages(count=5), "queue_name": "default_queue"}
+        payload = {
+            "data": self._generate_messages(count=5),
+            "queue_name": "default_queue",
+        }
 
         with self.client.post(
             "/jobs", json=payload, catch_response=True, name="POST /jobs (normal)"
@@ -45,7 +50,10 @@ class APIUser(FastHttpUser):
     @task(2)
     def submit_job_bulk(self):
         """Submit bulk job - weighted 2x (less common)."""
-        payload = {"data": self._generate_messages(count=20), "queue_name": "bulk_queue"}
+        payload = {
+            "data": self._generate_messages(count=20),
+            "queue_name": "bulk_queue",
+        }
 
         with self.client.post(
             "/jobs", json=payload, catch_response=True, name="POST /jobs (bulk)"
@@ -73,7 +81,10 @@ class APIUser(FastHttpUser):
         }
 
         with self.client.post(
-            "/jobs", json=payload, catch_response=True, name="POST /jobs (high priority)"
+            "/jobs",
+            json=payload,
+            catch_response=True,
+            name="POST /jobs (high priority)",
         ) as response:
             if response.status_code == 200:
                 response.success()
@@ -88,7 +99,9 @@ class APIUser(FastHttpUser):
                     "id": f"msg-{int(time.time())}-{i}",
                     "content": f"Test message {i} - {random.choice(['processing', 'analytics', 'notification'])}",
                     "timestamp": datetime.now().isoformat(),
-                    "priority": random.choice([0, 0, 0, 200]),  # 75% low/normal, 25% higher priority
+                    "priority": random.choice(
+                        [0, 0, 0, 200]
+                    ),  # 75% low/normal, 25% higher priority
                 }
             }
             for i in range(count)
@@ -103,7 +116,10 @@ class BurstAPIUser(FastHttpUser):
     @task
     def burst_submission(self):
         """Simulate burst of submissions."""
-        payload = {"data": self._generate_messages(count=50), "queue_name": "burst_queue"}
+        payload = {
+            "data": self._generate_messages(count=50),
+            "queue_name": "burst_queue",
+        }
 
         with self.client.post(
             "/jobs", json=payload, catch_response=True, name="POST /jobs (burst)"

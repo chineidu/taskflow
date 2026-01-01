@@ -9,6 +9,7 @@ from src import create_logger
 from src.api.core.cache import setup_cache
 from src.api.core.ratelimit import limiter
 from src.config import app_settings
+from src.db.init import ainit_db
 
 if TYPE_CHECKING:
     pass
@@ -33,13 +34,33 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:  # noqa: ARG001
         # ================= Load Dependencies ================
         # ====================================================
 
-        # ---------- Setup rate limiter ----------
-        app.state.limiter = limiter
-        logger.info("Rate limiter initialized")
+        # ---------- Setup database ----------
+        try:
+            await ainit_db()
+            app.state.db_available = True
+            logger.info("✅ Database initialized successfully")
+        except Exception as db_error:
+            app.state.db_available = False
+            logger.warning(f"⚠️  Database unavailable: {db_error}")
+            logger.warning("Server will start in degraded mode without database connectivity")
 
         # ---------- Setup cache ----------
-        app.state.cache = setup_cache()
-        logger.info("Cache initialized")
+        try:
+            app.state.cache = setup_cache()
+            # Test Redis connection
+            await app.state.cache.set("_healthcheck", "ok", ttl=5)
+            await app.state.cache.delete("_healthcheck")
+            logger.info("✅ Redis cache initialized successfully")
+        except Exception as cache_error:
+            logger.error("❌ Redis connection failed")
+            logger.error(f"   Error: {cache_error}")
+            logger.error(f"   Redis host => {app_settings.REDIS_HOST}:{app_settings.REDIS_PORT}")
+            logger.error("   Make sure Redis is running")
+            raise RuntimeError(f"Redis is required but unavailable: {cache_error}") from cache_error
+
+        # ---------- Setup rate limiter ----------
+        app.state.limiter = limiter
+        logger.info("✅ Rate limiter initialized")
 
         logger.info(f"Application startup completed in {time.perf_counter() - start_time:.2f} seconds")
 
@@ -50,7 +71,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:  # noqa: ARG001
     # =============== Cleanup Dependencies ===============
     # ====================================================
     except Exception as e:
-        logger.error(f"Failed to load model during startup: {e}")
+        logger.error("❌ Application startup failed")
+        logger.error(f"   Reason: {e}")
         raise
 
     finally:

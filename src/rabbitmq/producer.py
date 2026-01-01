@@ -68,7 +68,11 @@ class RabbitMQProducer(BaseRabbitMQ):
             Tuple indicating success status and task ID.
         """
         routing_key = routing_key or queue_name
-        delivery_mode = aio_pika.DeliveryMode.PERSISTENT if durable else aio_pika.DeliveryMode.NOT_PERSISTENT
+        delivery_mode = (
+            aio_pika.DeliveryMode.PERSISTENT
+            if durable
+            else aio_pika.DeliveryMode.NOT_PERSISTENT
+        )
         timestamp = datetime.now()
         task_id = str(uuid4())
 
@@ -87,17 +91,23 @@ class RabbitMQProducer(BaseRabbitMQ):
                 timestamp=timestamp,
                 headers={"task_id": task_id},
             )
-            await self.channel.default_exchange.publish(rabbitmq_message, routing_key=routing_key)
+            await self.channel.default_exchange.publish(
+                rabbitmq_message, routing_key=routing_key
+            )
 
             logger.info(f"[+] Published message to queue '{queue_name}': {message}")
             return (True, task_id)
 
         except aio_pika.exceptions.AMQPException as e:
-            logger.error(f"[-] AMQP error while publishing to queue '{queue_name}': {e}")
+            logger.error(
+                f"[-] AMQP error while publishing to queue '{queue_name}': {e}"
+            )
             return (False, "")
 
         except (json.JSONDecodeError, TypeError, UnicodeEncodeError) as e:
-            logger.error(f"[-] Serialization error while publishing to queue '{queue_name}': {e}")
+            logger.error(
+                f"[-] Serialization error while publishing to queue '{queue_name}': {e}"
+            )
             return (False, "")
 
         except Exception as e:
@@ -153,5 +163,7 @@ class RabbitMQProducer(BaseRabbitMQ):
                 logger.error(f"Failed to publish message {idx} in batch: {e}")
                 continue
 
-        logger.info(f"Batch publish completed: {messages_sent}/{len(messages)} messages sent")
+        logger.info(
+            f"Batch publish completed: {messages_sent}/{len(messages)} messages sent"
+        )
         return (messages_sent, task_ids)

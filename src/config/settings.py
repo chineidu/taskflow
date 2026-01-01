@@ -83,18 +83,15 @@ class Settings(BaseSettingsConfig):
         """
         Constructs the database connection URL.
 
-        This is the database used for user authentication and API-specific tables.
-        It's separate from MLflow's database to avoid conflicts.
-
         Returns
         -------
         str
             Complete database connection URL in the format:
-            postgresql+psycopg2://user:password@host:port/dbname
+            postgresql+asyncpg://user:password@host:port/dbname
         """
         password: str = quote(self.POSTGRES_PASSWORD.get_secret_value(), safe="")
         url: str = (
-            f"postgresql+psycopg2://{self.POSTGRES_USER}"
+            f"postgresql+asyncpg://{self.POSTGRES_USER}"
             f":{password}"
             f"@{self.POSTGRES_HOST}"
             f":{self.POSTGRES_PORT}"
@@ -107,18 +104,15 @@ class Settings(BaseSettingsConfig):
         """
         Constructs the API database connection URL.
 
-        This is the database used for user authentication and API-specific tables.
-        It's separate from MLflow's database to avoid conflicts.
-
         Returns
         -------
         str
             Complete database connection URL in the format:
-            postgresql+psycopg2://user:password@host:port/dbname
+            postgresql+asyncpg://user:password@host:port/dbname
         """
         password: str = quote(self.POSTGRES_PASSWORD.get_secret_value(), safe="")
         url: str = (
-            f"postgresql+psycopg2://{self.POSTGRES_USER}"
+            f"postgresql+asyncpg://{self.POSTGRES_USER}"
             f":{password}"
             f"@{self.POSTGRES_HOST}"
             f":{self.POSTGRES_PORT}"
