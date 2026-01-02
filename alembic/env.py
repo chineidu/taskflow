@@ -1,8 +1,9 @@
 # type: ignore
+import asyncio
 from logging.config import fileConfig
 
-from asyncpg.connection import Connection
 from sqlalchemy import pool
+from sqlalchemy.engine.base import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
@@ -105,4 +106,5 @@ async def arun_migrations_online() -> None:
 if context.is_offline_mode():
     run_migrations_offline()
 else:
-    arun_migrations_online()
+    # Use asyncio.run to execute the async entry point
+    asyncio.run(arun_migrations_online())
