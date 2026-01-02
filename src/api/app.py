@@ -8,36 +8,20 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from starlette.middleware.base import BaseHTTPMiddleware
 
+from src.api.core.exceptions import BaseAPIError, api_error_handler
 from src.api.core.lifespan import lifespan
-from src.api.core.middleware import (
-    ErrorHandlingMiddleware,
-    LoggingMiddleware,
-    RequestIDMiddleware,
-)
+from src.api.core.middleware import MIDDLEWARE_STACK
 from src.api.routes import (
     # admin,
     # auth,
     health,
     # task_status,
-    submit_job,
+    job,
 )
 from src.config import app_config, app_settings
 
 warnings.filterwarnings("ignore")
-
-# ===== Define the stack of middleware =====
-# REQUEST FLOW:
-# RequestIDMiddleware (Outermost) -> LoggingMiddleware -> ErrorHandlingMiddleware -> [Endpoint]
-#
-# RESPONSE FLOW:
-# [Endpoint] -> ErrorHandlingMiddleware -> LoggingMiddleware -> RequestIDMiddleware (Outermost)
-MIDDLEWARE_STACK: list[type[BaseHTTPMiddleware]] = [
-    RequestIDMiddleware,  # 1. Touches request first
-    LoggingMiddleware,  # 2. Touches request second
-    ErrorHandlingMiddleware,  # 3. Touches request third (closest to route)
-]
 
 
 def create_application() -> FastAPI:
@@ -73,18 +57,19 @@ def create_application() -> FastAPI:
     )
 
     # Add custom middleware (LIFO: Last In, First Out for requests)
-    for mdlware in reversed(MIDDLEWARE_STACK):
+    for mdlware in MIDDLEWARE_STACK:
         app.add_middleware(mdlware)
 
     # Include routers
     # app.include_router(admin.router, prefix=prefix)
     # app.include_router(auth.router, prefix=auth_prefix)
     app.include_router(health.router, prefix=prefix)
-    app.include_router(submit_job.router, prefix=prefix)
+    app.include_router(job.router, prefix=prefix)
     # app.include_router(task_status.router, prefix=prefix)
 
     # Add exception handlers
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore
+    app.add_exception_handler(BaseAPIError, api_error_handler)  # type: ignore
 
     return app
 

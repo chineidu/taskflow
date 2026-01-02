@@ -4,10 +4,15 @@ import signal
 import sys
 from typing import TYPE_CHECKING, Any, Callable
 
+from sqlalchemy.exc import DatabaseError
+
 from src import create_logger
 from src.config import app_settings
+from src.db.models import aget_db_session
+from src.db.repositories.task_repository import TaskRepository
 from src.rabbitmq.base import BaseRabbitMQ
 from src.schemas.rabbitmq.payload import RabbitMQPayload
+from src.schemas.types import TaskStatusEnum
 
 if TYPE_CHECKING:
     from src.config.config import AppConfig
@@ -98,14 +103,38 @@ class RabbitMQConsumer(BaseRabbitMQ):
                                 )
                                 continue
 
-                            # Call the provided callback
-                            logger.info(f"[+] Processing task_id={task_id}")
-                            if asyncio.iscoroutinefunction(callback):
-                                await callback(message_dict)
-                            else:
-                                callback(message_dict)
+                            # ===== Initialize DB session and repository =====
+                            try:
+                                async with aget_db_session() as db:
+                                    repo = TaskRepository(db)
+                                    # Immediate State Change
+                                    await repo.aupdate_task_status(task_id, status=TaskStatusEnum.IN_PROGRESS)
+                                    logger.info(f"[*] Task {task_id} is now IN_PROGRESS")
 
-                            logger.info(f"[+] Completed task_id={task_id}")
+                                    # ===== Call the provided callback function =====
+                                    try:
+                                        if asyncio.iscoroutinefunction(callback):
+                                            await callback(message_dict)
+                                        else:
+                                            callback(message_dict)
+
+                                        # Final State: SUCCESS
+                                        await repo.aupdate_task_status(
+                                            task_id, status=TaskStatusEnum.COMPLETED
+                                        )
+                                        logger.info(f"[+] Task {task_id} COMPLETED")
+
+                                    except Exception as e:
+                                        # Final State: FAILURE
+                                        await repo.aupdate_task_status(
+                                            task_id, status=TaskStatusEnum.FAILED, error=str(e)
+                                        )
+                                        logger.error(f"[-] Task {task_id} FAILED: {e}")
+
+                            except DatabaseError as db_err:
+                                logger.error(f"[-] Database error for task_id={task_id}: {db_err}")
+                                # Requeue the message for later processing
+                                raise db_err
 
                     except asyncio.CancelledError:
                         logger.info("[+] Message processing cancelled")
@@ -132,7 +161,7 @@ async def example_consumer_callback(message: RabbitMQPayload) -> None:
         The deserialized message payload.
     """
     # Simulate processing
-    await asyncio.sleep(0.2)
+    await asyncio.sleep(0.8)
     logger.info(f"Processing message: {message}")
 
 

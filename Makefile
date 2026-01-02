@@ -45,7 +45,7 @@ install:
 	@echo "📦 Installing dependencies..."
 	uv sync
 
-.PHONY: api-run api-run-gunicorn
+.PHONY: api-run api-run-gunicorn consumer-run
 # ===============================
 # ========== START APP ==========
 # ===============================
@@ -85,6 +85,10 @@ api-run-gunicorn:
 		-k uvicorn.workers.UvicornWorker \
 		src.api.app:app \
 		-w $(WORKERS) --bind "0.0.0.0:$(PORT)"
+
+consumer-run:
+	@echo "🚀 Starting RabbitMQ Consumer..."
+	@uv run -m src.rabbitmq.consumer
 
 .PHONY: check-port kill-port
 # ===============================

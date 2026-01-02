@@ -5,9 +5,10 @@ Crud operations for the task repository.
 """
 
 from datetime import datetime
+from typing import Any
 
 from dateutil.parser import parse  # Very fast, handles ISO formats well
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -29,20 +30,81 @@ class TaskRepository:
 
     async def aget_task_by_id(self, task_id: str) -> DBTask | None:
         """Get a task by its task ID."""
-        stmt = select(DBTask).where(DBTask.task_id == task_id)
-        return await self.db.scalar(stmt)
+        try:
+            stmt = select(DBTask).where(DBTask.task_id == task_id)
+            return await self.db.scalar(stmt)
+        except Exception as e:
+            logger.error(f"Error fetching task by id {task_id}: {e}")
+            return None
 
     async def aget_tasks_by_ids(self, task_ids: list[str]) -> list[DBTask]:
         """Get tasks by their task IDs."""
-        stmt = select(DBTask).where(DBTask.task_id.in_(task_ids))
-        result = await self.db.scalars(stmt)
-        return list(result.all())
+        try:
+            stmt = select(DBTask).where(DBTask.task_id.in_(task_ids))
+            result = await self.db.scalars(stmt)
+            return list(result.all())
+        except Exception as e:
+            logger.error(f"Error fetching tasks by ids {task_ids}: {e}")
+            return []
 
     async def aget_tasks_by_status(self, status: TaskStatusEnum) -> list[DBTask]:
         """Get tasks by their status."""
-        stmt = select(DBTask).where(DBTask.status == status.value)
-        result = await self.db.scalars(stmt)
-        return list(result.all())
+        try:
+            stmt = select(DBTask).where(DBTask.status == status.value)
+            result = await self.db.scalars(stmt)
+            return list(result.all())
+        except Exception as e:
+            logger.error(f"Error fetching tasks by status {status}: {e}")
+            return []
+
+    async def aget_tasks_paginated(
+        self,
+        status: TaskStatusEnum | None = None,
+        limit: int = 10,
+        offset: int = 0,
+    ) -> tuple[list[DBTask], int]:
+        """Get tasks with pagination and optional status filter.
+
+        Parameters
+        ----------
+        status : TaskStatusEnum | None
+            Filter by task status. If None, returns all tasks.
+        limit : int
+            Maximum number of tasks to return (default: 10).
+        offset : int
+            Number of tasks to skip (default: 0).
+
+        Returns
+        -------
+        tuple[list[DBTask], int]
+            A tuple of (tasks, total_count) where tasks is the paginated list
+            and total_count is the total number of tasks matching the filter.
+        """
+        try:
+            # 1. Prepare base filtering
+            # Using a list of filters makes it easy to add more (e.g., date ranges) later
+            filters = []
+            if status:
+                filters.append(DBTask.status == status.value)
+
+            # 2. Get TOTAL COUNT (Let Postgres do the work)
+            # This returns a single aggregate (value) instead of 100,000 IDs
+            count_stmt = select(func.count()).select_from(DBTask).where(*filters)
+            total = await self.db.scalar(count_stmt) or 0
+
+            # 3. Get PAGINATED RESULTS
+            # Ensure the order matches your index for maximum speed
+            stmt = (
+                select(DBTask).where(*filters).order_by(DBTask.created_at.desc()).limit(limit).offset(offset)
+            )
+
+            result = await self.db.scalars(stmt)
+            tasks = list(result.all())
+
+            return (tasks, total)
+        except Exception as e:
+            logger.error(f"Error fetching paginated tasks: {e}")
+            return ([], 0)
 
     async def aget_tasks_by_created_time(self, created_after: str, created_before: str) -> list[DBTask]:
         """Get tasks created within a specific time range. Uses database-level comparison.
@@ -135,12 +197,12 @@ class TaskRepository:
         """Update a task in the database in a single round trip."""
 
         # Filter out fields that are None/excluded
-        updated_data = {
+        update_data = {
             k: v
             for k, v in task.model_dump(exclude={"id", "created_at", "updated_at"}).items()
             if v is not None
         }
-        if not updated_data:
+        if not update_data:
             logger.info(f"No fields to update for task with task_id {task.task_id}. Skipping update.")
             return
 
@@ -151,7 +213,7 @@ class TaskRepository:
             if existing is None:
                 raise ValueError(f"Task with task_id {task.task_id!r} does not exist. Cannot update.")
 
-            stmt = update(DBTask).where(DBTask.task_id == task.task_id).values(**updated_data)
+            stmt = update(DBTask).where(DBTask.task_id == task.task_id).values(**update_data)
             await self.db.execute(stmt)
             await self.db.commit()
             logger.info(f"Successfully updated task with task_id {task.task_id!r}.")
@@ -192,6 +254,45 @@ class TaskRepository:
 
         except Exception as e:
             logger.error(f"Error batch updating tasks: {e}")
+            await self.db.rollback()
+            raise e
+
+    async def aupdate_task_status(
+        self, task_id: str, status: TaskStatusEnum, error: str | None = None
+    ) -> None:
+        """Mark a task as IN_PROGRESS, COMPLETED, FAILED, etc.
+
+        Parameters
+        ----------
+        task_id : str
+            The unique task identifier.
+        status : TaskStatusEnum
+            The new status to set for the task.
+        error : str | None
+            Optional error message if the task failed.
+
+        Raises
+        ------
+        Exception
+            If the update fails.
+        """
+        try:
+            update_values: dict[str, Any] = {"status": status.value}
+
+            if error:
+                # If marking as FAILED, set the error message
+                update_values["error_message"] = error
+            elif status == TaskStatusEnum.COMPLETED:
+                # Clear error message on successful completion
+                update_values["error_message"] = None
+
+            stmt = update(DBTask).where(DBTask.task_id == task_id).values(**update_values)
+            await self.db.execute(stmt)
+            await self.db.commit()
+            logger.info(f"Marked task_id={task_id} as {status.name}.")
+
+        except Exception as e:
+            logger.error(f"Error marking task_id={task_id} as {status.name}: {e}")
             await self.db.rollback()
             raise e
 

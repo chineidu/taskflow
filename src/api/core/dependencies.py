@@ -34,7 +34,6 @@ async def request_id_header_doc(
     """Dependency to document the X-Request-ID header in OpenAPI."""
     return
 
-
 def get_executor(max_workers: int | None = None) -> ThreadPoolExecutor:
     """Return a shared global ThreadPoolExecutor.
 

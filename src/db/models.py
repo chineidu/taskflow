@@ -7,6 +7,7 @@ from typing import AsyncGenerator
 from sqlalchemy import (
     JSON,
     DateTime,
+    Index,
     String,
     Text,
     func,
@@ -37,12 +38,16 @@ class DBTask(Base):
     id: Mapped[int] = mapped_column("id", primary_key=True)
     task_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    # Index for faster queries on `status` and `created_at` fields
     status: Mapped[str] = mapped_column(String(20), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=func.now(), onupdate=func.now()
+        DateTime(timezone=True), nullable=False, default=func.now(), onupdate=func.now()
     )
     error_message: Mapped[str] = mapped_column(Text, nullable=True)
+
+    # Composite index on status and created_at for optimized queries
+    __table_args__ = (Index("ix_tasks_status_created_at", "status", "created_at"),)
 
     def __repr__(self) -> str:
         """

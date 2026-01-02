@@ -132,3 +132,18 @@ class ErrorHandlingMiddleware(BaseHTTPMiddleware):
                     "path": str(request.url.path),
                 },
             )
+
+
+# ===== Define the stack of middleware =====
+# REQUEST FLOW:
+# RequestIDMiddleware (Outermost) -> LoggingMiddleware -> ErrorHandlingMiddleware -> [Endpoint]
+#
+# RESPONSE FLOW:
+# [Endpoint] -> ErrorHandlingMiddleware -> LoggingMiddleware -> RequestIDMiddleware (Outermost)
+MIDDLEWARE_STACK: list[type[BaseHTTPMiddleware]] = [
+    RequestIDMiddleware,  # 1. Touches request first
+    LoggingMiddleware,  # 2. Touches request second
+    ErrorHandlingMiddleware,  # 3. Touches request third (closest to route)
+]
+# Reverse the middleware stack to maintain the correct order! (LIFO: Last In, First Out for requests)
+MIDDLEWARE_STACK.reverse()

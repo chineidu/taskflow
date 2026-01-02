@@ -1,3 +1,3 @@
-from .v1 import health, submit_job
+from .v1 import health, job
 
-__all__ = ["health", "submit_job"]
+__all__ = ["health", "job"]
