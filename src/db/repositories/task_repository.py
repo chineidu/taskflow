@@ -296,6 +296,45 @@ class TaskRepository:
             await self.db.rollback()
             raise e
 
+    async def aupdate_log_info(
+        self, task_id: str, has_logs: bool, log_s3_key: str | None = None, log_s3_url: str | None = None
+    ) -> None:
+        """Atomically update log metadata for a task.
+
+        Parameters
+        ----------
+        task_id : str
+            The unique task identifier.
+        has_logs : bool
+            Whether the task has execution logs.
+        log_s3_key : str | None
+            S3 object key where the log file is stored.
+        log_s3_url : str | None
+            Full URL to access the log file from S3.
+
+        Raises
+        ------
+        Exception
+            If the update fails.
+        """
+        try:
+            update_values: dict[str, Any] = {"has_logs": has_logs}
+
+            if log_s3_key is not None:
+                update_values["log_s3_key"] = log_s3_key
+            if log_s3_url is not None:
+                update_values["log_s3_url"] = log_s3_url
+
+            stmt = update(DBTask).where(DBTask.task_id == task_id).values(**update_values)
+            await self.db.execute(stmt)
+            await self.db.commit()
+            logger.info(f"Updated log info for task_id={task_id}. has_logs={has_logs}")
+
+        except Exception as e:
+            logger.error(f"Error updating log info for task_id={task_id}: {e}")
+            await self.db.rollback()
+            raise e
+
     def convert_dbtask_to_schema(self, db_task: DBTask) -> TaskModel | None:
         """Convert a DBTask object to a TaskModel object."""
         try:

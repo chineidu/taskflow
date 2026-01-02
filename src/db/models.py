@@ -6,6 +6,7 @@ from typing import AsyncGenerator
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     DateTime,
     Index,
     String,
@@ -45,6 +46,9 @@ class DBTask(Base):
         DateTime(timezone=True), nullable=False, default=func.now(), onupdate=func.now()
     )
     error_message: Mapped[str] = mapped_column(Text, nullable=True)
+    has_logs: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    log_s3_key: Mapped[str] = mapped_column(String(255), nullable=True)
+    log_s3_url: Mapped[str] = mapped_column(Text, nullable=True)
 
     # Composite index on status and created_at for optimized queries
     __table_args__ = (Index("ix_tasks_status_created_at", "status", "created_at"),)
