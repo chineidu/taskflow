@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
 logger = create_logger(name="routes.submit_job")
 LIMIT_VALUE: int = app_config.api_config.ratelimit.default_rate
-router = APIRouter(tags=["submit_job"], default_response_class=MsgSpecJSONResponse)
+router = APIRouter(tags=["jobs"], default_response_class=MsgSpecJSONResponse)
 
 
 @router.post("/jobs", status_code=status.HTTP_200_OK)

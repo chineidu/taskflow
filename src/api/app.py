@@ -17,7 +17,7 @@ from src.api.routes import (
     # auth,
     health,
     # task_status,
-    job,
+    jobs,
     logs,
 )
 from src.config import app_config, app_settings
@@ -65,7 +65,7 @@ def create_application() -> FastAPI:
     # app.include_router(admin.router, prefix=prefix)
     # app.include_router(auth.router, prefix=auth_prefix)
     app.include_router(health.router, prefix=prefix)
-    app.include_router(job.router, prefix=prefix)
+    app.include_router(jobs.router, prefix=prefix)
     app.include_router(logs.router, prefix=prefix)
     # app.include_router(task_status.router, prefix=prefix)
 
