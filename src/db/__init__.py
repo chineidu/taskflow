@@ -33,7 +33,7 @@ class AsyncDatabasePool:
         -----
         database_url must start with postgresql+asyncpg://
         """
-        IS_DEV: bool = True if app_settings.ENVIRONMENT != EnvironmentEnum.PRODUCTION else False
+        IS_DEV: bool = True if app_settings.ENVIRONMENT == EnvironmentEnum.DEVELOPMENT else False
         self._engine = create_async_engine(
             self.database_url,
             pool_size=app_config.database_config.pool_size,  # Keep 30 connections in pool

@@ -41,14 +41,14 @@ class DBTask(Base):
     payload: Mapped[dict] = mapped_column(JSON, nullable=False)
     # Index for faster queries on `status` and `created_at` fields
     status: Mapped[str] = mapped_column(String(20), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=func.now(), onupdate=func.now()
-    )
     error_message: Mapped[str] = mapped_column(Text, nullable=True)
     has_logs: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     log_s3_key: Mapped[str] = mapped_column(String(255), nullable=True)
     log_s3_url: Mapped[str] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=func.now(), onupdate=func.now()
+    )
 
     # Composite index on status and created_at for optimized queries
     __table_args__ = (Index("ix_tasks_status_created_at", "status", "created_at"),)

@@ -2,17 +2,20 @@ import asyncio
 import json
 import signal
 import sys
+import tempfile
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
 from sqlalchemy.exc import DatabaseError
 
-from src import create_logger
+from src import add_file_handler, create_logger
 from src.config import app_settings
 from src.db.models import aget_db_session
 from src.db.repositories.task_repository import TaskRepository
 from src.rabbitmq.base import BaseRabbitMQ
 from src.schemas.rabbitmq.payload import RabbitMQPayload
 from src.schemas.types import TaskStatusEnum
+from src.services.storage import S3StorageService
 
 if TYPE_CHECKING:
     from src.config.config import AppConfig
@@ -111,28 +114,100 @@ class RabbitMQConsumer(BaseRabbitMQ):
                                     await repo.aupdate_task_status(task_id, status=TaskStatusEnum.IN_PROGRESS)
                                     logger.info(f"[*] Task {task_id} is now IN_PROGRESS")
 
-                                    # ===== Call the provided callback function =====
-                                    try:
-                                        if asyncio.iscoroutinefunction(callback):
-                                            await callback(message_dict)
-                                        else:
-                                            callback(message_dict)
+                                    # ==== Retrievable logging info ====
+                                    # All logs within this block will be captured and uploaded to S3
+                                    # suffix=".log" helps S3 content-type detection
+                                    with tempfile.NamedTemporaryFile(
+                                        mode="w+", suffix=".log", delete=True
+                                    ) as tmp_file:
+                                        task_handler = add_file_handler(logger, tmp_file.name)
+                                        temp_path = Path(tmp_file.name)
+                                        s3_service = S3StorageService()
 
-                                        # Final State: SUCCESS
-                                        await repo.aupdate_task_status(
-                                            task_id, status=TaskStatusEnum.COMPLETED
-                                        )
-                                        logger.info(f"[+] Task {task_id} COMPLETED")
+                                        # ===== Call the provided callback function =====
+                                        try:
+                                            if asyncio.iscoroutinefunction(callback):
+                                                await callback(message_dict)
+                                            else:
+                                                callback(message_dict)
 
-                                    except Exception as e:
-                                        # Final State: FAILURE
-                                        await repo.aupdate_task_status(
-                                            task_id, status=TaskStatusEnum.FAILED, error=str(e)
-                                        )
-                                        logger.error(f"[-] Task {task_id} FAILED: {e}")
+                                            logger.removeHandler(task_handler)
+                                            # Stop logging and save the file.
+                                            task_handler.close()
+                                            # Upload logs to S3 if file has content
+                                            if temp_path.stat().st_size > 0:
+                                                await s3_service.aupload_file_to_s3(
+                                                    filepath=temp_path,
+                                                    task_id=task_id,
+                                                    correlation_id=correlation_id,
+                                                    environment=app_settings.ENVIRONMENT,
+                                                )
+                                                # Update logs info in DB
+                                                s3_key = s3_service.get_object_name(task_id)
+                                                s3_url = s3_service.get_s3_object_url(task_id)
+                                                await repo.aupdate_log_info(
+                                                    task_id,
+                                                    has_logs=True,
+                                                    log_s3_key=s3_key,
+                                                    log_s3_url=s3_url,
+                                                )
+                                                logger.info(
+                                                    f"[+] Task {task_id} uploaded logs to S3 and "
+                                                    "COMPLETED successfully"
+                                                )
+
+                                            else:
+                                                await repo.aupdate_log_info(
+                                                    task_id,
+                                                    has_logs=False,
+                                                )
+                                                logger.warning(f"[x] No logs to upload for task {task_id}")
+
+                                            # Final State: SUCCESS
+                                            await repo.aupdate_task_status(
+                                                task_id, status=TaskStatusEnum.COMPLETED
+                                            )
+
+                                        except Exception as callback_error:
+                                            # Final State: FAILURE
+                                            # Cleanup logging handler and upload the logs collected so far
+                                            logger.removeHandler(task_handler)
+                                            task_handler.close()
+
+                                            # Log even if callback failed
+                                            if temp_path.exists() and temp_path.stat().st_size > 0:
+                                                await s3_service.aupload_file_to_s3(
+                                                    filepath=temp_path,
+                                                    task_id=task_id,
+                                                    correlation_id=correlation_id,
+                                                    environment=app_settings.ENVIRONMENT,
+                                                )
+                                                # Update logs info in DB
+                                                s3_key = s3_service.get_object_name(task_id)
+                                                s3_url = s3_service.get_s3_object_url(task_id)
+                                                await repo.aupdate_log_info(
+                                                    task_id,
+                                                    has_logs=True,
+                                                    log_s3_key=s3_key,
+                                                    log_s3_url=s3_url,
+                                                )
+                                                logger.info(
+                                                    f"[+] Task {task_id} uploaded logs to S3 after FAILURE"
+                                                )
+                                            else:
+                                                await repo.aupdate_log_info(
+                                                    task_id,
+                                                    has_logs=False,
+                                                )
+                                            await repo.aupdate_task_status(
+                                                task_id,
+                                                status=TaskStatusEnum.FAILED,
+                                                error=str(callback_error),
+                                            )
+                                            logger.error(f"[x] Task {task_id} FAILED: {callback_error}")
 
                             except DatabaseError as db_err:
-                                logger.error(f"[-] Database error for task_id={task_id}: {db_err}")
+                                logger.error(f"[x] Database error for task_id={task_id}: {db_err}")
                                 # Requeue the message for later processing
                                 raise db_err
 
@@ -141,7 +216,7 @@ class RabbitMQConsumer(BaseRabbitMQ):
                         raise
 
                     except Exception as e:
-                        logger.error(f"[-] Error processing task_id={task_id}: {e}")
+                        logger.error(f"[x] Error processing task_id={task_id}: {e}")
 
             logger.info("[+] Exiting consume loop")
 
@@ -188,7 +263,7 @@ async def run_worker() -> None:
             # Create consume task
             consume_task = asyncio.create_task(
                 consumer.consume(
-                    queue_name="test_queue",
+                    queue_name=app_config.rabbitmq_config.queue_names.task_queue,
                     callback=example_consumer_callback,
                     durable=True,
                 )
@@ -210,18 +285,29 @@ async def run_worker() -> None:
     except asyncio.CancelledError:
         logger.info("[+] Consumer cancelled, cleaning up...")
     except Exception as e:
-        logger.error(f"[-] Error in main: {e}")
+        logger.error(f"[x] Error in main: {e}")
         raise
+
+
+async def main() -> None:
+    """Entry point to run the consumer with S3 bucket check."""
+    s3_service = S3StorageService()
+    if not await s3_service.acheck_bucket_exists():
+        logger.error("[x] S3 bucket not accessible")
+        sys.exit(1)
+    logger.info("[+] S3 bucket is accessible, starting consumer...")
+
+    await run_worker()
 
 
 if __name__ == "__main__":
     try:
-        asyncio.run(run_worker())
+        asyncio.run(main())
         logger.info("[+] Exiting gracefully")
 
     except KeyboardInterrupt:
         logger.info("[+] Received KeyboardInterrupt, exiting...")
         sys.exit(0)
     except Exception as e:
-        logger.error(f"[-] Fatal error running consumer: {e}")
+        logger.error(f"[x] Fatal error running consumer: {e}")
         sys.exit(1)

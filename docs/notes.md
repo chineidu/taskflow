@@ -21,6 +21,7 @@ Each section outlines a specific architectural choice, the rationale behind it, 
     - [Error Resilience](#error-resilience)
   - [Caching Strategy](#caching-strategy)
   - [Rate Limiting Strategy](#rate-limiting-strategy)
+  - [Logging & Debugging Strategy](#logging--debugging-strategy)
 
 <!-- /TOC -->
 
@@ -94,3 +95,13 @@ Internally, `dataclasses` with `slots=True` are used to avoid the "validation ta
 
 - **Decision**: Distributed Rate Limiting via Redis.
 - **Rationale**: At 100 RPS, in-memory rate limiting fails across multiple workers; using Redis with `slowapi` enforces global rate limits consistently across all instances.
+
+---
+
+## Logging & Debugging Strategy
+
+- **Decision**: Tier 3 Object Storage (S3-Compatible) for execution logs.
+- **Rationale**:
+  - **Database Performance**: Prevents "Database Bloat." Storing large text blobs in Postgres degrades index performance and increases VACUUM overhead (extra work the database must do to reclaim storage).
+  - **Scalability**: Decouples log storage from transaction processing. S3 provides extremely high (99.999999999%) durability and handle infinite horizontal scaling.
+- **Implementation**: Workers upload logs to `{task_id}.log` upon completion; API provides a streaming endpoint to retrieve logs on-demand.

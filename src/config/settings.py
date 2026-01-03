@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 from urllib.parse import quote
 
 from dotenv import load_dotenv
@@ -63,7 +64,18 @@ class Settings(BaseSettingsConfig):
     REDIS_PASSWORD: SecretStr = SecretStr("your_redis_password")
     REDIS_DB: int = 0
 
-    @field_validator("PORT", "POSTGRES_PORT", "REDIS_PORT", mode="before")
+    # ===== S3 / OBJECT STORAGE =====
+    AWS_S3_HOST: str = "localhost"
+    AWS_S3_PORT: int = 9000
+    AWS_S3_BUCKET: str = "taskflow-logs"
+    AWS_ACCESS_KEY_ID: SecretStr = SecretStr("admin")
+    AWS_SECRET_ACCESS_KEY: SecretStr = SecretStr("admin123")
+    AWS_DEFAULT_REGION: str = "us-east-1"
+    # ---- Extra settings for log management ----
+    LOG_MAX_SIZE_BYTES: int = 20 * 1024 * 1024  # 20MB
+    LOG_RETENTION_DAYS: int = 60
+
+    @field_validator("PORT", "POSTGRES_PORT", "REDIS_PORT", "AWS_S3_PORT", mode="before")
     @classmethod
     def parse_port_fields(cls, v: str | int) -> int:
         """Parses port fields to ensure they are integers."""
@@ -157,6 +169,23 @@ class Settings(BaseSettingsConfig):
             url: str = f"redis://:{password}@{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
         else:
             url = f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+        return url
+
+    @property
+    def aws_s3_endpoint_url(self) -> str:
+        """
+        Constructs the AWS S3 endpoint URL.
+
+        Returns
+        -------
+        str
+            Complete AWS S3 endpoint URL in the format:
+            http(s)://host:port
+        """
+        scheme: Literal["http", "https"] = (
+            "https" if self.ENVIRONMENT == EnvironmentEnum.PRODUCTION else "http"
+        )
+        url: str = f"{scheme}://{self.AWS_S3_HOST}:{self.AWS_S3_PORT}"
         return url
 
 

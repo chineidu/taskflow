@@ -3,7 +3,7 @@
 import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncGenerator
 
 import boto3
 from botocore.client import Config
@@ -51,6 +51,45 @@ def _download_from_s3(client: Any, filepath: str | Path, bucket_name: str, objec
     except Exception as exc:
         logger.error(f"[x] Download failed: {exc}")
         return False
+
+
+def _get_s3_stream(client: Any, bucket_name: str, key: str) -> Any:
+    """Get a streaming body from S3.
+
+    Parameters
+    ----------
+    client : Any
+        Boto3 S3 client.
+    bucket_name : str
+        Name of the S3 bucket.
+    key : str
+        Object key in S3.
+
+    Returns
+    -------
+    Any
+        The streaming body object.
+
+    Raises
+    ------
+    ClientError
+        If the object does not exist or there's an S3 error.
+    """
+    try:
+        response = client.get_object(Bucket=bucket_name, Key=key)
+        return response["Body"]
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code")
+        if error_code == "NoSuchKey":
+            logger.error(f"[x] Object not found in S3: bucket={bucket_name}, key={key}")
+        else:
+            logger.error(f"[x] S3 error retrieving object: bucket={bucket_name}, key={key}, error={e}")
+        raise
+    except Exception as e:
+        logger.error(
+            f"[x] Unexpected error retrieving object from S3: bucket={bucket_name}, key={key}, error={e}"
+        )
+        raise
 
 
 class S3StorageService:
@@ -125,7 +164,7 @@ class S3StorageService:
         if file_size > max_allowed_size_bytes:
             raise ValueError(f"Log size: {file_size:,} bytes exceeds max: {max_allowed_size_bytes:,} bytes")
 
-        object_name = f"logs/{filepath.name}"
+        object_name = self.get_object_name(task_id)
         extra_args = UploadResultExtraArgs(
             Metadata=S3UploadMetadata(
                 task_id=task_id,
@@ -138,7 +177,6 @@ class S3StorageService:
         )
         success = await self._aupload_to_s3(
             filepath,
-            self.bucket_name,
             object_name,
             extra_args,
         )
@@ -150,7 +188,7 @@ class S3StorageService:
 
         return success
 
-    async def adownload_file_to_s3(
+    async def adownload_file_from_s3(
         self,
         *,
         filepath: str | Path,
@@ -176,8 +214,8 @@ class S3StorageService:
             If the download fails.
         """
         filepath = Path(filepath) if isinstance(filepath, str) else filepath
-        object_name: str = f"logs/{task_id}.log"
-        success: bool = await self._adownload_from_s3(filepath, self.bucket_name, object_name)
+        object_name: str = self.get_object_name(task_id)
+        success: bool = await self._adownload_from_s3(filepath, object_name)
         if not success:
             raise RuntimeError("S3 download failed")
 
@@ -186,10 +224,49 @@ class S3StorageService:
 
         return success
 
+    async def aget_s3_stream(self, task_id: str) -> Any:
+        """Asynchronously get a streaming body from S3."""
+        object_name = self.get_object_name(task_id)
+        return await asyncio.to_thread(_get_s3_stream, self.s3_client, self.bucket_name, object_name)
+
+    async def as3_stream_generator(self, streaming_body: Any) -> AsyncGenerator[bytes, None]:
+        """Generator to yield chunks from S3 body without blocking the loop."""
+        while True:
+            # Read in 128KB chunks
+            chunk = await asyncio.to_thread(streaming_body.read, 1024 * 128)
+            if not chunk:
+                break
+            yield chunk
+
+    async def acheck_bucket_exists(self) -> bool:
+        """Check if the bucket exists and is accessible."""
+        try:
+            await asyncio.to_thread(self.s3_client.head_bucket, Bucket=self.bucket_name)
+            logger.info(f"[+] Successfully verified bucket: {self.bucket_name}")
+            return True
+
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code")
+            if error_code == "404":
+                logger.error(f"Bucket {self.bucket_name} does not exist.")
+            elif error_code == "403":
+                logger.error(f"Access denied to bucket {self.bucket_name}.")
+            else:
+                logger.error(f"S3 Error: {e}")
+            return False
+
+    def get_object_name(self, task_id: str) -> str:
+        """Get the S3 object name for a given task ID."""
+        return f"logs/{task_id}.log"
+
+    def get_s3_object_url(self, task_id: str) -> str:
+        """Get the S3 object URL format."""
+        object_name: str = self.get_object_name(task_id)
+        return f"{self.s3_client.meta.endpoint_url}/{self.bucket_name}/{object_name}"
+
     async def _aupload_to_s3(
         self,
         filepath: str | Path,
-        bucket_name: str,
         object_name: str,
         extra_args: UploadResultExtraArgs,
     ) -> bool:
@@ -198,7 +275,7 @@ class S3StorageService:
             _upload_to_s3,
             self.s3_client,
             filepath,
-            bucket_name,
+            self.bucket_name,
             object_name,
             extra_args,
         )
@@ -206,7 +283,6 @@ class S3StorageService:
     async def _adownload_from_s3(
         self,
         filepath: str | Path,
-        bucket_name: str,
         object_name: str,
     ) -> bool:
         """Helper function to download a file from S3 asynchronously."""
@@ -214,6 +290,6 @@ class S3StorageService:
             _download_from_s3,
             self.s3_client,
             filepath,
-            bucket_name,
+            self.bucket_name,
             object_name,
         )

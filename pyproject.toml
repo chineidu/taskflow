@@ -9,6 +9,7 @@ dependencies = [
     "aiocache[redis]>=0.12.3",
     "alembic>=1.17.2",
     "asyncpg>=0.31.0",
+    "boto3>=1.42.19",
     "fastapi[standard]>=0.128.0",
     "msgspec>=0.20.0",
     "omegaconf>=2.3.0",
@@ -31,6 +32,6 @@ dev = [
 [tool.pyrefly]
 
 #### configuring what to type check and where to import from
-project-includes = ["src"]
+project-includes = ["src", "."]
 project-excludes = ["**/.[!/.]*", "**/tests"]
 search-path = ["."]

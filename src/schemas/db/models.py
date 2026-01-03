@@ -18,6 +18,15 @@ class TaskModel:
     created_at: str | None = field(
         default=None, metadata={"description": "Timestamp when the task was created."}
     )
+    has_logs: bool = field(
+        metadata={"description": "Indicates if the task has associated logs."},
+    )
+    log_s3_key: str | None = field(
+        metadata={"description": "S3 key where the task logs are stored."},
+    )
+    log_s3_url: str | None = field(
+        metadata={"description": "S3 URL where the task logs are stored."},
+    )
     updated_at: str | None = field(
         default=None,
         metadata={"description": "Timestamp when the task was last updated."},
@@ -26,7 +35,7 @@ class TaskModel:
         default=None, metadata={"description": "Error message if the task failed."}
     )
 
-    def model_dump(self, exclude: set[str]| None = None) -> dict[str, Any]:
+    def model_dump(self, exclude: set[str] | None = None) -> dict[str, Any]:
         """
         Convert the TaskModel instance to a dictionary.
 

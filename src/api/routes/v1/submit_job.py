@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.ext.asyncio.session import AsyncSession
 
 from src import create_logger
-from src.api.core.dependencies import request_id_header_doc
+from src.api.core.dependencies import arequest_id_header_doc
 from src.api.core.exceptions import HTTPError, UnexpectedError
 from src.api.core.ratelimit import limiter
 from src.api.core.responses import MsgSpecJSONResponse
@@ -30,7 +30,7 @@ router = APIRouter(tags=["submit_job"], default_response_class=MsgSpecJSONRespon
 async def submit_job(
     request: Request,  # Required by SlowAPI  # noqa: ARG001
     data: InputSchema,
-    _=Depends(request_id_header_doc),  # noqa: ANN001
+    _=Depends(arequest_id_header_doc),  # noqa: ANN001
     db: AsyncSession = Depends(aget_db),
 ) -> JobSubmissionResponseSchema:
     """Route for submitting job for processing."""

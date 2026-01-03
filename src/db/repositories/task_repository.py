@@ -34,7 +34,7 @@ class TaskRepository:
             stmt = select(DBTask).where(DBTask.task_id == task_id)
             return await self.db.scalar(stmt)
         except Exception as e:
-            logger.error(f"Error fetching task by id {task_id}: {e}")
+            logger.error(f"Error fetching task by id '{task_id}': {e}")
             return None
 
     async def aget_tasks_by_ids(self, task_ids: list[str]) -> list[DBTask]:
@@ -289,10 +289,10 @@ class TaskRepository:
             stmt = update(DBTask).where(DBTask.task_id == task_id).values(**update_values)
             await self.db.execute(stmt)
             await self.db.commit()
-            logger.info(f"Marked task_id={task_id} as {status.name}.")
+            logger.info(f"Marked task_id='{task_id}' as {status.name}.")
 
         except Exception as e:
-            logger.error(f"Error marking task_id={task_id} as {status.name}: {e}")
+            logger.error(f"Error marking task_id='{task_id}' as {status.name}: {e}")
             await self.db.rollback()
             raise e
 
@@ -318,22 +318,24 @@ class TaskRepository:
             If the update fails.
         """
         try:
-            update_values: dict[str, Any] = {"has_logs": has_logs}
-
-            if log_s3_key is not None:
-                update_values["log_s3_key"] = log_s3_key
-            if log_s3_url is not None:
-                update_values["log_s3_url"] = log_s3_url
-
-            stmt = update(DBTask).where(DBTask.task_id == task_id).values(**update_values)
+            stmt = (
+                update(DBTask)
+                .where(DBTask.task_id == task_id)
+                .values(
+                    has_logs=has_logs,
+                    log_s3_key=log_s3_key,
+                    log_s3_url=log_s3_url,
+                )
+            )
             await self.db.execute(stmt)
             await self.db.commit()
-            logger.info(f"Updated log info for task_id={task_id}. has_logs={has_logs}")
+            logger.info(f"Updated log info for task_id='{task_id}'. has_logs={has_logs}")
 
         except Exception as e:
-            logger.error(f"Error updating log info for task_id={task_id}: {e}")
+            logger.error(f"Error updating log info for task_id='{task_id}': {e}")
             await self.db.rollback()
             raise e
+    
 
     def convert_dbtask_to_schema(self, db_task: DBTask) -> TaskModel | None:
         """Convert a DBTask object to a TaskModel object."""
@@ -343,6 +345,9 @@ class TaskRepository:
                 task_id=db_task.task_id,
                 payload=db_task.payload,
                 status=TaskStatusEnum(db_task.status),
+                has_logs=db_task.has_logs,
+                log_s3_key=db_task.log_s3_key,
+                log_s3_url=db_task.log_s3_url,
                 # Safer way to handle the datetime -> str conversion
                 created_at=getattr(db_task.created_at, "isoformat", lambda **kwargs: None)(  # noqa: ARG005
                     timespec="seconds"

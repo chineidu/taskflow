@@ -56,4 +56,29 @@ def create_logger(
     return logger
 
 
+def add_file_handler(logger: logging.Logger, log_file: str | Path) -> logging.FileHandler:
+    """Dynamically adds a file handler using the standard app format.
+    
+    Parameters
+    ----------
+    logger : logging.Logger
+        The logger instance to which the file handler will be added.
+    log_file : str | Path
+        The path to the log file.
+
+    Returns
+    -------
+    logging.FileHandler
+        The added file handler instance.
+    """
+    formatter = logging.Formatter(
+        fmt="%(asctime)s - %(name)s - [%(levelname)s] - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    return file_handler
+
+
 __all__ = ["ROOT"]

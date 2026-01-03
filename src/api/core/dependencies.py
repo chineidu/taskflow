@@ -7,6 +7,7 @@ from fastapi import Header, Request
 
 from src.api.core.exceptions import ResourcesNotFoundError
 from src.schemas.types import ResourceEnum
+from src.services.storage import S3StorageService
 
 if TYPE_CHECKING:
     pass
@@ -16,14 +17,14 @@ _executor: ThreadPoolExecutor | None = None
 _executor_lock = threading.Lock()
 
 
-async def get_cache(request: Request) -> Cache:
+async def aget_cache(request: Request) -> Cache:
     """Dependency to inject cache into endpoints."""
     if not hasattr(request.app.state, "cache") or request.app.state.cache is None:
         raise ResourcesNotFoundError(resource_type=ResourceEnum.CACHE)
     return request.app.state.cache
 
 
-async def request_id_header_doc(
+async def arequest_id_header_doc(
     x_request_id: str | None = Header(  # noqa: ARG001
         default=None,
         alias="X-Request-ID",
@@ -33,6 +34,13 @@ async def request_id_header_doc(
 ) -> None:
     """Dependency to document the X-Request-ID header in OpenAPI."""
     return
+
+
+async def aget_storage_service() -> S3StorageService:
+    """Dependency to inject storage service into endpoints."""
+
+    return S3StorageService()
+
 
 def get_executor(max_workers: int | None = None) -> ThreadPoolExecutor:
     """Return a shared global ThreadPoolExecutor.

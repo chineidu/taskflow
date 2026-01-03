@@ -7,8 +7,8 @@ from sqlalchemy.ext.asyncio.session import AsyncSession
 
 from src import create_logger
 from src.api.core.cache import cached
-from src.api.core.dependencies import get_cache, request_id_header_doc
-from src.api.core.exceptions import HTTPError, ResourcesNotFoundError, UnexpectedError
+from src.api.core.dependencies import aget_cache, arequest_id_header_doc
+from src.api.core.exceptions import HTTPError, ResourcesNotFoundError
 from src.api.core.ratelimit import limiter
 from src.api.core.responses import MsgSpecJSONResponse
 from src.config import app_config
@@ -33,7 +33,7 @@ router = APIRouter(tags=["submit_job"], default_response_class=MsgSpecJSONRespon
 async def submit_job(
     request: Request,  # Required by SlowAPI  # noqa: ARG001
     data: InputSchema,
-    _=Depends(request_id_header_doc),  # noqa: ANN001
+    _=Depends(arequest_id_header_doc),  # noqa: ANN001
     db: AsyncSession = Depends(aget_db),
 ) -> JobSubmissionResponseSchema:
     """Route for submitting job for processing."""
@@ -56,10 +56,14 @@ async def submit_job(
             task_id=response.task_ids[i] if i < len(response.task_ids) else "unknown",
             payload={"message": message, "queue_name": queue_name},
             status=TaskStatusEnum.PENDING,
+            has_logs=False,
+            log_s3_key=None,
+            log_s3_url=None,
         )
         for i, message in enumerate(messages)
     ]
     if not tasks:
+        logger.error("[x] No tasks to store in the database after job submission")
         raise HTTPError(
             details="No tasks to store in the database",
         )
@@ -71,6 +75,7 @@ async def submit_job(
         status=TaskStatusEnum.PENDING,
     )
 
+
 @router.get("/jobs/{task_id}", status_code=status.HTTP_200_OK)
 @cached(ttl=300, key_prefix="job")  # type: ignore
 @limiter.limit(f"{LIMIT_VALUE}/minute")
@@ -78,16 +83,19 @@ async def get_job(
     request: Request,  # Required by SlowAPI  # noqa: ARG001
     task_id: Annotated[str, Path(description="The ID of the task to retrieve.")],
     db: AsyncSession = Depends(aget_db),
-    cache: Cache = Depends(get_cache),  # Required by caching decorator  # noqa: ARG001
+    cache: Cache = Depends(aget_cache),  # Required by caching decorator  # noqa: ARG001
 ) -> TaskModel:
     """Route for fetching task details."""
     task_repo = TaskRepository(db=db)
     _task = await task_repo.aget_task_by_id(task_id)
 
     if not _task:
+        logger.warning(f"[x] Task not found: task_id={task_id}")
         raise ResourcesNotFoundError(f"task '{task_id}'")
+
     task = task_repo.convert_dbtask_to_schema(_task)
     if not task:
+        logger.warning(f"[x] Task conversion failed: task_id={task_id}")
         raise ResourcesNotFoundError(f"task '{task_id}'")
 
     return task
@@ -102,7 +110,7 @@ async def get_all_jobs(
     limit: Annotated[int, Query(description="Number of items per page", ge=1, le=100)] = 10,
     offset: Annotated[int, Query(description="Number of items to skip", ge=0)] = 0,
     db: AsyncSession = Depends(aget_db),
-    cache: Cache = Depends(get_cache),  # Required by caching decorator  # noqa: ARG001
+    cache: Cache = Depends(aget_cache),  # Required by caching decorator  # noqa: ARG001
 ) -> TasksResponse:
     """Route for fetching all tasks with pagination and optional status filtering."""
     task_repo = TaskRepository(db=db)
@@ -116,6 +124,7 @@ async def get_all_jobs(
     tasks = [task_repo.convert_dbtask_to_schema(task) for task in _tasks]
 
     if not tasks:
+        logger.warning("[x] No tasks found matching the criteria")
         raise ResourcesNotFoundError("tasks matching the criteria")
 
     return TasksResponse(

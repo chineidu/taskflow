@@ -1,3 +1,4 @@
+import asyncio
 import time
 import warnings
 from contextlib import asynccontextmanager
@@ -13,8 +14,8 @@ from src.db.init import ainit_db
 
 if TYPE_CHECKING:
     pass
-warnings.filterwarnings("ignore")
 
+warnings.filterwarnings("ignore")
 logger = create_logger(name="api_lifespan")
 
 
@@ -77,6 +78,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:  # noqa: ARG001
 
     finally:
         logger.info("Shutting down application...")
+
+        # ---------- Cleanup log cleanup task ----------
+        if hasattr(app.state, "cleanup_task"):
+            try:
+                cleanup_task = app.state.cleanup_task
+                cleanup_task.cancel()
+                try:
+                    await cleanup_task
+                except asyncio.CancelledError:
+                    logger.info("🚨 Log cleanup task cancelled")
+            except Exception as e:
+                logger.error(f"❌ Error shutting down log cleanup task: {e}")
 
         # ---------- Cleanup rate limiter ----------
         if hasattr(app.state, "limiter"):

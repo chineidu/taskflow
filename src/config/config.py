@@ -8,6 +8,12 @@ from src import ROOT
 
 
 @dataclass(slots=True, kw_only=True)
+class QueueNames:
+    task_queue: str = field(metadata={"description": "Name of the task queue"})
+    result_queue: str = field(metadata={"description": "Name of the result queue"})
+
+
+@dataclass(slots=True, kw_only=True)
 class RabbitMQConfig:
     max_retries: int = field(default=3, metadata={"description": "Maximum number of connection retries"})
     retry_delay: int = field(
@@ -17,6 +23,7 @@ class RabbitMQConfig:
     connection_timeout: int = field(default=5, metadata={"description": "Connection timeout in seconds"})
     heartbeat: int = field(default=60, metadata={"description": "Heartbeat interval in seconds"})
     prefetch_count: int = field(default=5, metadata={"description": "Number of messages to prefetch"})
+    queue_names: QueueNames = field(metadata={"description": "Names of the RabbitMQ queues"})
 
 
 @dataclass(slots=True, kw_only=True)
@@ -89,7 +96,6 @@ class AppConfig(BaseModel):
     """Application configuration with validation."""
 
     rabbitmq_config: RabbitMQConfig = Field(
-        default_factory=RabbitMQConfig,
         description="Configuration settings for RabbitMQ connection",
     )
     api_config: APIConfig = Field(description="Configuration settings for the API")

@@ -5,6 +5,9 @@ config:
     connection_timeout: 5
     heartbeat: 60
     prefetch_count: 5
+    queue_names:
+      task_queue: task_queue
+      result_queue: result_queue
 
   api_config:
     title: TaskFlow API

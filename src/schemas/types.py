@@ -4,6 +4,8 @@ from enum import StrEnum
 class EnvironmentEnum(StrEnum):
     DEVELOPMENT = "development"
     PRODUCTION = "production"
+    STAGING = "staging"
+    TESTING = "testing"
 
 
 class ErrorCodeEnum(StrEnum):

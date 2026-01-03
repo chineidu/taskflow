@@ -78,11 +78,11 @@ class RabbitMQProducer(BaseRabbitMQ):
 
         if self.channel is None:
             logger.error("[-] Cannot publish message: Channel is not established")
-            return (False, "")
+            return (False, task_id)
 
         try:
             # Create and publish the message
-            body = json.dumps(message.to_dict()).encode()
+            body = json.dumps(message.model_dump()).encode()
             rabbitmq_message = aio_pika.Message(
                 body=body,
                 content_type="application/json",
@@ -102,17 +102,17 @@ class RabbitMQProducer(BaseRabbitMQ):
             logger.error(
                 f"[-] AMQP error while publishing to queue '{queue_name}': {e}"
             )
-            return (False, "")
+            return (False, task_id)
 
         except (json.JSONDecodeError, TypeError, UnicodeEncodeError) as e:
             logger.error(
                 f"[-] Serialization error while publishing to queue '{queue_name}': {e}"
             )
-            return (False, "")
+            return (False, task_id)
 
         except Exception as e:
             logger.error(f"[-] Failed to publish message to queue '{queue_name}': {e}")
-            return (False, "")
+            return (False, task_id)
 
     async def abatch_publish(
         self,
@@ -157,10 +157,11 @@ class RabbitMQProducer(BaseRabbitMQ):
                 )
                 if success:
                     messages_sent += 1
-                    task_ids.append(task_id)
+                task_ids.append(task_id)
 
             except Exception as e:
                 logger.error(f"Failed to publish message {idx} in batch: {e}")
+                task_ids.append(str(uuid4()))
                 continue
 
         logger.info(

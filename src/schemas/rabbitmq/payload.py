@@ -8,13 +8,13 @@ class RabbitMQPayload:
         metadata={"description": "Payload data for the task"}
     )
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert the RabbitMQPayload instance to a dictionary.
+    def model_dump(self) -> dict[str, Any]:
+        """Convert the instance to a dictionary.
 
         Returns
         -------
         dict[str, Any]
-            Dictionary representation of the RabbitMQPayload.
+            Dictionary representation.
         """
         return asdict(self)
 

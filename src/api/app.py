@@ -18,6 +18,7 @@ from src.api.routes import (
     health,
     # task_status,
     job,
+    logs,
 )
 from src.config import app_config, app_settings
 
@@ -65,6 +66,7 @@ def create_application() -> FastAPI:
     # app.include_router(auth.router, prefix=auth_prefix)
     app.include_router(health.router, prefix=prefix)
     app.include_router(job.router, prefix=prefix)
+    app.include_router(logs.router, prefix=prefix)
     # app.include_router(task_status.router, prefix=prefix)
 
     # Add exception handlers

@@ -24,10 +24,12 @@ class InputSchema(BaseSchema):
         json_schema_extra={
             "example": {
                 "task_type": "data_processing",
-                "queue_name": "test_queue",
+                "queue_name": "task_queue",
                 "data": [
                     {"payload": {"key1": "value1", "key2": "value2"}},
                     {"payload": {"keyA": "valueA", "keyB": "valueB"}},
+                    {"payload": {"keyX": "valueX", "keyY": "valueY"}},
+                    {"payload": {"keyM": "valueM", "keyN": "valueN", "keyO": "valueO"}},
                 ],
             }
         }
