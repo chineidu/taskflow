@@ -1,8 +1,10 @@
 import asyncio
 import json
+import random
 import signal
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -13,7 +15,6 @@ from src.config import app_settings
 from src.db.models import aget_db_session
 from src.db.repositories.task_repository import TaskRepository
 from src.rabbitmq.base import BaseRabbitMQ
-from src.schemas.rabbitmq.payload import RabbitMQPayload
 from src.schemas.types import TaskStatusEnum
 from src.services.storage import S3StorageService
 
@@ -24,7 +25,7 @@ logger = create_logger("consumer")
 RABBITMQ_URL: str = app_settings.rabbitmq_url
 
 # Takes a [deserialized message dict] and returns [Any]
-type CONSUMER_CALLBACK_FN = Callable[[RabbitMQPayload], Any]
+type CONSUMER_CALLBACK_FN = Callable[[dict[str, Any]], Any]
 
 
 class RabbitMQConsumer(BaseRabbitMQ):
@@ -227,17 +228,58 @@ class RabbitMQConsumer(BaseRabbitMQ):
             logger.error(f"Unexpected error consuming from queue '{queue_name}': {e}")
 
 
-async def example_consumer_callback(message: RabbitMQPayload) -> None:
-    """Example consumer callback function.
+# ================ Example Usage ================
+async def process_data_chunk(chunk_id: int, data: dict[str, Any]) -> None:  # noqa: ARG001
+    """Simulates a nested function to test if child logs are captured."""
+    logger.debug(f"  [Sub-Task] Starting sub-chunk {chunk_id} processing...")
+    await asyncio.sleep(0.6)
 
-    Parameters
-    ----------
-    message : RabbitMQPayload
-        The deserialized message payload.
+    if random.random() < 0.1:  # 10% chance to log a warning
+        logger.warning(f"  [Sub-Task] Chunk {chunk_id} detected high memory pressure.")
+
+    logger.debug(f"  [Sub-Task] Chunk {chunk_id} successfully transformed.")
+
+
+async def example_consumer_callback(message: dict[str, Any]) -> None:
     """
-    # Simulate processing
-    await asyncio.sleep(0.8)
-    logger.info(f"Processing message: {message}")
+    Complex callback to test multi-level logging capture and S3 upload.
+    """
+    start_time = time.perf_counter()
+    task_data = message
+
+    logger.info("🚀 Starting high-complexity execution...")
+    logger.info(f"Target Payload: {json.dumps(task_data, indent=2)}")
+
+    try:
+        # Phase 1: Validation
+        logger.info("Phase 1: Validating input schema...")
+        if not task_data:
+            logger.error("❌ Validation Failed: Empty payload received.")
+            raise ValueError("Empty Payload")
+        await asyncio.sleep(0.3)
+        logger.info("✅ Validation complete.")
+
+        # Phase 2: Transformation (Nested Logging)
+        logger.info("Phase 2: Processing data chunks...")
+        for i in range(1, 4):
+            await process_data_chunk(i, task_data)
+        logger.info("✅ All 3 chunks processed.")
+
+        # Phase 3: External 'Service' simulation
+        logger.info("Phase 3: Communicating with external AI service...")
+        await asyncio.sleep(0.5)
+        # Randomly simulate an 'insight' for the log
+        confidence = random.uniform(0.85, 0.99)
+        logger.info(f"🤖 AI Inference complete. Confidence Score: {confidence:.2%}")
+
+        # Summary
+        end_time = time.perf_counter()
+        duration = end_time - start_time
+        logger.info(f"🏁 Task execution finished successfully in {duration:.2f} seconds.")
+
+    except Exception as e:
+        logger.exception(f"💥 Fatal error during callback execution: {str(e)}")
+        raise  # Re-raise to let the consumer handle the FAILED status update
 
 
 async def run_worker() -> None:

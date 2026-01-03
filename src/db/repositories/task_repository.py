@@ -279,6 +279,13 @@ class TaskRepository:
         try:
             update_values: dict[str, Any] = {"status": status.value}
 
+            # Automatically set timestamps based on status
+            now = func.now()
+            if status == TaskStatusEnum.IN_PROGRESS:
+                update_values["started_at"] = now
+            elif status in (TaskStatusEnum.COMPLETED, TaskStatusEnum.FAILED):
+                update_values["completed_at"] = now
+
             if error:
                 # If marking as FAILED, set the error message
                 update_values["error_message"] = error
@@ -335,7 +342,6 @@ class TaskRepository:
             logger.error(f"Error updating log info for task_id='{task_id}': {e}")
             await self.db.rollback()
             raise e
-    
 
     def convert_dbtask_to_schema(self, db_task: DBTask) -> TaskModel | None:
         """Convert a DBTask object to a TaskModel object."""
@@ -350,6 +356,12 @@ class TaskRepository:
                 log_s3_url=db_task.log_s3_url,
                 # Safer way to handle the datetime -> str conversion
                 created_at=getattr(db_task.created_at, "isoformat", lambda **kwargs: None)(  # noqa: ARG005
+                    timespec="seconds"
+                ),
+                started_at=getattr(db_task.started_at, "isoformat", lambda **kwargs: None)(  # noqa: ARG005
+                    timespec="seconds"
+                ),
+                completed_at=getattr(db_task.completed_at, "isoformat", lambda **kwargs: None)(  # noqa: ARG005
                     timespec="seconds"
                 ),
                 updated_at=getattr(db_task.updated_at, "isoformat", lambda **kwargs: None)(  # noqa: ARG005

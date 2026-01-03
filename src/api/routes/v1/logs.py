@@ -39,7 +39,7 @@ async def get_task_logs(
     db: AsyncSession = Depends(aget_db),
     storage_service: "S3StorageService" = Depends(aget_storage_service),
     cache: Cache = Depends(aget_cache),  # Required by caching decorator  # noqa: ARG001
-) -> Any:
+) -> StreamingResponse:
     """Retrieve execution logs for a completed or failed task.
 
     Parameters
@@ -49,8 +49,8 @@ async def get_task_logs(
 
     Returns
     -------
-    LogResponse
-        The log content and metadata.
+    StreamingResponse
+        The log content.
     """
     logger.info(f"[+] Retrieving logs for task_id={task_id}")
     task_repo = TaskRepository(db)

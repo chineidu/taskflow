@@ -15,9 +15,6 @@ class TaskModel:
     task_id: str = field(metadata={"description": "Unique task identifier."})
     payload: dict[str, Any] = field(metadata={"description": "Payload data associated with the task."})
     status: TaskStatusEnum = field(metadata={"description": "Current status of the task."})
-    created_at: str | None = field(
-        default=None, metadata={"description": "Timestamp when the task was created."}
-    )
     has_logs: bool = field(
         metadata={"description": "Indicates if the task has associated logs."},
     )
@@ -26,6 +23,15 @@ class TaskModel:
     )
     log_s3_url: str | None = field(
         metadata={"description": "S3 URL where the task logs are stored."},
+    )
+    created_at: str | None = field(
+        default=None, metadata={"description": "Timestamp when the task was created."}
+    )
+    started_at: str | None = field(
+        default=None, metadata={"description": "Timestamp when the task started."},
+    )
+    completed_at: str | None = field(
+        default=None, metadata={"description": "Timestamp when the task was completed."},
     )
     updated_at: str | None = field(
         default=None,
