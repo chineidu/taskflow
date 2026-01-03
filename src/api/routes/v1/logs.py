@@ -1,6 +1,6 @@
 """API routes for accessing task execution logs."""
 
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated
 
 from aiocache.factory import Cache
 from botocore.exceptions import BotoCoreError, ClientError

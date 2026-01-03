@@ -12,14 +12,7 @@ from slowapi.errors import RateLimitExceeded
 from src.api.core.exceptions import BaseAPIError, api_error_handler
 from src.api.core.lifespan import lifespan
 from src.api.core.middleware import MIDDLEWARE_STACK
-from src.api.routes import (
-    # admin,
-    # auth,
-    health,
-    # task_status,
-    jobs,
-    logs,
-)
+from src.api.routes import health, jobs, logs
 from src.config import app_config, app_settings
 
 warnings.filterwarnings("ignore")

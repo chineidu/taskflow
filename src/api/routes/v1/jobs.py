@@ -14,9 +14,13 @@ from src.api.core.responses import MsgSpecJSONResponse
 from src.config import app_config
 from src.db.models import aget_db
 from src.db.repositories.task_repository import TaskRepository
-from src.schemas.db.models import TaskModel
+from src.schemas.db.models import TaskModel, TaskModelSchema, convert_task_model_to_response
 from src.schemas.rabbitmq.payload import SubmittedJobResult
-from src.schemas.routes.job import InputSchema, JobSubmissionResponseSchema, TasksResponse
+from src.schemas.routes.job import (
+    InputSchema,
+    JobSubmissionResponseSchema,
+    TasksResponseSchema,
+)
 from src.schemas.types import TaskStatusEnum
 from src.services.producer import atrigger_job
 
@@ -84,7 +88,7 @@ async def get_job(
     task_id: Annotated[str, Path(description="The ID of the task to retrieve.")],
     db: AsyncSession = Depends(aget_db),
     cache: Cache = Depends(aget_cache),  # Required by caching decorator  # noqa: ARG001
-) -> TaskModel:
+) -> TaskModelSchema:
     """Route for fetching task details."""
     task_repo = TaskRepository(db=db)
     _task = await task_repo.aget_task_by_id(task_id)
@@ -98,7 +102,7 @@ async def get_job(
         logger.warning(f"[x] Task conversion failed: task_id={task_id}")
         raise ResourcesNotFoundError(f"task '{task_id}'")
 
-    return task
+    return convert_task_model_to_response(task)
 
 
 @router.get("/jobs", status_code=status.HTTP_200_OK)
@@ -111,7 +115,7 @@ async def get_all_jobs(
     offset: Annotated[int, Query(description="Number of items to skip", ge=0)] = 0,
     db: AsyncSession = Depends(aget_db),
     cache: Cache = Depends(aget_cache),  # Required by caching decorator  # noqa: ARG001
-) -> TasksResponse:
+) -> TasksResponseSchema:
     """Route for fetching all tasks with pagination and optional status filtering."""
     task_repo = TaskRepository(db=db)
     # Use database-level pagination for better performance
@@ -127,7 +131,7 @@ async def get_all_jobs(
         logger.warning("[x] No tasks found matching the criteria")
         raise ResourcesNotFoundError("tasks matching the criteria")
 
-    return TasksResponse(
+    return TasksResponseSchema(
         tasks=tasks,
         total=total,
         limit=limit,

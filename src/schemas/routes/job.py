@@ -1,5 +1,3 @@
-from dataclasses import dataclass, field
-
 from pydantic import ConfigDict, Field, field_validator
 
 from src import create_logger
@@ -8,7 +6,7 @@ from src.schemas.db.models import TaskModel
 from src.schemas.rabbitmq.payload import RabbitMQPayload
 from src.schemas.types import TaskStatusEnum
 
-logger = create_logger(name="schemas.submit_job")
+logger = create_logger(name="schemas.jobs")
 
 
 class InputSchema(BaseSchema):
@@ -62,11 +60,10 @@ class JobSubmissionResponseSchema(BaseSchema):
         return TaskStatusEnum.PENDING.value
 
 
-@dataclass(slots=True, kw_only=True)
-class TasksResponse:
+class TasksResponseSchema(BaseSchema):
     """Schema for tasks response."""
 
-    tasks: list[TaskModel | None] = field(default_factory=list, metadata={"description": "List of tasks."})
-    total: int = field(default=0, metadata={"description": "Total number of tasks matching the criteria."})
-    limit: int = field(default=10, metadata={"description": "Number of tasks per page."})
-    offset: int = field(default=0, metadata={"description": "Number of tasks to skip."})
+    tasks: list[TaskModel] = Field(default_factory=list, description="List of tasks.")
+    total: int = Field(default=0, description="Total number of tasks matching the criteria.")
+    limit: int = Field(default=10, description="Number of tasks per page.")
+    offset: int = Field(default=0, description="Number of tasks to skip.")
