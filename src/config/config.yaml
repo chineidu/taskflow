@@ -8,6 +8,11 @@ config:
     queue_names:
       task_queue: task_queue
       result_queue: result_queue
+    dlq_config:
+      dlq_name: task_queue_dlq
+      dlx_name: task_queue_dlx
+    message_retries: 3
+    retry_backoff_delay: 2
 
   api_config:
     title: TaskFlow API

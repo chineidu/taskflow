@@ -22,6 +22,9 @@ Each section outlines a specific architectural choice, the rationale behind it, 
   - [Caching Strategy](#caching-strategy)
   - [Rate Limiting Strategy](#rate-limiting-strategy)
   - [Logging & Debugging Strategy](#logging--debugging-strategy)
+  - [Resilience Strategy](#resilience-strategy)
+    - [Dead-Letter Queue DLQ for Failed Messages](#dead-letter-queue-dlq-for-failed-messages)
+    - [Retry Backoff Strategy](#retry-backoff-strategy)
 
 <!-- /TOC -->
 
@@ -105,3 +108,23 @@ Internally, `dataclasses` with `slots=True` are used to avoid the "validation ta
   - **Database Performance**: Prevents "Database Bloat." Storing large text blobs in Postgres degrades index performance and increases VACUUM overhead (extra work the database must do to reclaim storage).
   - **Scalability**: Decouples log storage from transaction processing. S3 provides extremely high (99.999999999%) durability and handle infinite horizontal scaling.
 - **Implementation**: Workers upload logs to `{task_id}.log` upon completion; API provides a streaming endpoint to retrieve logs on-demand.
+
+---
+
+## Resilience Strategy
+
+### Dead-Letter Queue (DLQ) for Failed Messages
+
+- **Decision**: Implemented a Dead-Letter Queue (DLQ) for messages that exceed retry limits.
+- **Rationale**:
+  - **Message Durability**: Ensures that messages that cannot be processed after a defined number of retries are not lost but instead routed to a DLQ for further inspection.
+  - **Poison Message Handling**: Prevents poison messages from clogging the main processing queue, allowing for smoother operation and easier debugging. (These messages are acknowledged and NOT requeued.)
+- **Implementation**: Configured RabbitMQ producer to set `x-dead-letter-exchange` on the main queue, directing failed messages to the DLQ after exceeding the retry threshold defined in the configuration.
+
+### Retry Backoff Strategy
+
+- **Decision**: Implemented exponential backoff for message retries.
+- **Rationale**:
+  - **System Stability**: Prevents overwhelming the system with rapid retry attempts, especially during transient failures.
+  - **Improved Success Rates**: Allows time for temporary issues (e.g., network glitches, service unavailability) to resolve before retrying message processing.
+- **Implementation**: Configured the consumer to wait for an exponentially increasing delay (e.g., 2^n seconds) before each retry attempt, where `n` is the number of previous attempts, up to a maximum delay threshold.

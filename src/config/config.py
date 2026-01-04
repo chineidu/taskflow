@@ -14,6 +14,12 @@ class QueueNames:
 
 
 @dataclass(slots=True, kw_only=True)
+class DLQConfig:
+    dlq_name: str = field(metadata={"description": "Name of the dead-letter queue"})
+    dlx_name: str = field(metadata={"description": "Name of the dead-letter exchange"})
+
+
+@dataclass(slots=True, kw_only=True)
 class RabbitMQConfig:
     max_retries: int = field(default=3, metadata={"description": "Maximum number of connection retries"})
     retry_delay: int = field(
@@ -24,6 +30,11 @@ class RabbitMQConfig:
     heartbeat: int = field(default=60, metadata={"description": "Heartbeat interval in seconds"})
     prefetch_count: int = field(default=5, metadata={"description": "Number of messages to prefetch"})
     queue_names: QueueNames = field(metadata={"description": "Names of the RabbitMQ queues"})
+    dlq_config: DLQConfig = field(metadata={"description": "Dead-letter queue configuration"})
+    message_retries: int = field(default=3, metadata={"description": "Number of times to retry a message"})
+    retry_backoff_delay: int = field(
+        default=2, metadata={"description": "Backoff delay multiplier for message retries"}
+    )
 
 
 @dataclass(slots=True, kw_only=True)

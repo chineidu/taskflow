@@ -31,7 +31,13 @@ async def atrigger_job(
     producer = RabbitMQProducer(config=app_config)
 
     async with producer.aconnection_context():
-        await producer.aensure_queue(queue_name=queue_name, durable=True)
+        await producer.aensure_queue(
+            queue_name=queue_name,
+            arguments={
+                "x-dead-letter-exchange": app_config.rabbitmq_config.dlq_config.dlx_name,
+            },
+            durable=True,
+        )
         num_msgs, task_ids = await producer.abatch_publish(
             messages=messages,
             queue_name=queue_name,

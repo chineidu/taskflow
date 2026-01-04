@@ -1,6 +1,6 @@
 import asyncio
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, AsyncGenerator
+from typing import TYPE_CHECKING, Any, AsyncGenerator
 
 import aio_pika
 
@@ -69,9 +69,7 @@ class BaseRabbitMQ:
 
                     # Set prefetch count
                     if self.channel is not None:
-                        await self.channel.set_qos(
-                            prefetch_count=self.config.rabbitmq_config.prefetch_count
-                        )
+                        await self.channel.set_qos(prefetch_count=self.config.rabbitmq_config.prefetch_count)
 
                     if await self._is_connected():
                         logger.info("[+] Successfully connected to RabbitMQ")
@@ -87,9 +85,7 @@ class BaseRabbitMQ:
                         await asyncio.sleep(delay)
                     else:
                         # All retries exhausted
-                        logger.error(
-                            "[-] Failed to connect to RabbitMQ after all retries"
-                        )
+                        logger.error("[-] Failed to connect to RabbitMQ after all retries")
                         raise
 
     async def adisconnect(self) -> None:
@@ -118,6 +114,7 @@ class BaseRabbitMQ:
     async def aensure_queue(
         self,
         queue_name: str,
+        arguments: dict[str, Any] | None = None,
         durable: bool = True,
     ) -> aio_pika.abc.AbstractQueue:
         """Ensure queue exists with specified settings.
@@ -126,6 +123,8 @@ class BaseRabbitMQ:
         ----------
         queue_name : str
             The name of the queue to ensure.
+        arguments : dict[str, Any], optional
+            Additional arguments for queue declaration (e.g. DLQ settings), by default None.
         durable : bool, optional
             Whether the queue should persist after broker restart, by default True.
 
@@ -142,12 +141,52 @@ class BaseRabbitMQ:
             raise RuntimeError("[-] Failed to establish channel connection")
 
         try:
-            queue = await self.channel.declare_queue(queue_name, durable=durable)
+            queue = await self.channel.declare_queue(queue_name, arguments=arguments, durable=durable)
             logger.debug(f"Queue '{queue_name}' ensured")
             return queue
 
         except aio_pika.exceptions.AMQPException as e:
             logger.error(f"Failed to declare queue '{queue_name}': {e}")
+            raise
+
+    async def aensure_dlq(
+        self,
+        dlq_name: str,
+        dlx_name: str,
+    ) -> aio_pika.abc.AbstractQueue:
+        """Ensure DLQ and DLX exists with specified settings.
+
+        Parameters
+        ----------
+        dlq_name : str
+            The name of the dead-letter queue to ensure.
+        dlx_name : str
+            The name of the dead-letter exchange to ensure.
+
+        Returns
+        -------
+        aio_pika.abc.AbstractQueue
+            The declared queue.
+        """
+        if self.channel is None:
+            logger.debug("Channel not established, connecting...")
+            await self.aconnect()
+
+        if self.channel is None:
+            raise RuntimeError("[-] Failed to establish channel connection")
+
+        try:
+            # Dead Letter Exchange (Fanout for simplicity)
+            dlx = await self.channel.declare_exchange(dlx_name, aio_pika.ExchangeType.FANOUT, durable=True)
+            # Dead Letter Queue
+            queue = await self.channel.declare_queue(dlq_name, durable=True)
+            # Bind DLQ to DLX
+            await queue.bind(dlx)
+            logger.info(f"DLQ '{dlq_name}' and DLX '{dlx_name}' ensured")
+            return queue
+
+        except aio_pika.exceptions.AMQPException as e:
+            logger.error(f"Failed to ensure DLQ '{dlq_name}' and DLX '{dlx_name}': {e}")
             raise
 
     @asynccontextmanager
