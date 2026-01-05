@@ -117,7 +117,7 @@ class BaseRabbitMQ:
         arguments: dict[str, Any] | None = None,
         durable: bool = True,
     ) -> aio_pika.abc.AbstractQueue:
-        """Ensure queue exists with specified settings.
+        """Ensure queue exists with specified settings. Idempotent operation.
 
         Parameters
         ----------
@@ -154,7 +154,7 @@ class BaseRabbitMQ:
         dlq_name: str,
         dlx_name: str,
     ) -> aio_pika.abc.AbstractQueue:
-        """Ensure DLQ and DLX exists with specified settings.
+        """Ensure DLQ and DLX exists with specified settings. Idempotent operation.
 
         Parameters
         ----------
@@ -187,6 +187,50 @@ class BaseRabbitMQ:
 
         except aio_pika.exceptions.AMQPException as e:
             logger.error(f"Failed to ensure DLQ '{dlq_name}' and DLX '{dlx_name}': {e}")
+            raise
+
+    async def aensure_delay_queue(
+        self, delay_queue_name: str, target_queue_name: str, ttl_ms: int
+    ) -> aio_pika.abc.AbstractQueue:
+        """Ensure a delay queue that routes messages to the target queue after a TTL. Idempotent operation.
+
+        Parameters
+        ----------
+        delay_queue_name : str
+            The name of the delay queue to ensure.
+        target_queue_name : str
+            The name of the target queue where messages will be routed after the delay.
+        ttl_ms : int
+            The time-to-live in milliseconds for messages in the delay queue.
+
+        Returns
+        -------
+        aio_pika.abc.AbstractQueue
+            The declared delay queue.
+        """
+        if self.channel is None:
+            logger.debug("Channel not established, connecting...")
+            await self.aconnect()
+
+        if self.channel is None:
+            raise RuntimeError("[-] Failed to establish channel connection")
+
+        try:
+            arguments = {
+                "x-dead-letter-exchange": "",  # Default exchange
+                "x-dead-letter-routing-key": target_queue_name,
+                "x-message-ttl": ttl_ms,
+            }
+            delay_queue = await self.channel.declare_queue(
+                delay_queue_name,
+                durable=True,
+                arguments=arguments,
+            )
+            logger.info(f"Delay queue '{delay_queue_name}' ensured with TTL {ttl_ms}ms")
+            return delay_queue
+
+        except aio_pika.exceptions.AMQPException as e:
+            logger.error(f"Failed to declare delay queue '{delay_queue_name}': {e}")
             raise
 
     @asynccontextmanager

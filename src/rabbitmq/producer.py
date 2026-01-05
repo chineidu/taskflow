@@ -1,6 +1,6 @@
 import json
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import aio_pika
@@ -46,6 +46,8 @@ class RabbitMQProducer(BaseRabbitMQ):
         routing_key: str | None = None,
         request_id: str | None = None,
         durable: bool = True,
+        headers: dict[str, Any] | None = None,
+        task_id: str | None = None,
     ) -> tuple[bool, str]:
         """Publish a message to the specified RabbitMQ queue.
 
@@ -61,6 +63,10 @@ class RabbitMQProducer(BaseRabbitMQ):
             The request ID for the message for tracking, by default None.
         durable : bool, optional
             Whether the queue should be durable, by default True.
+        headers : dict[str, Any] | None, optional
+            Additional headers to include in the message, by default None.
+        task_id : str | None, optional
+            Predefined task ID for the message, by default None.
 
         Returns
         -------
@@ -68,46 +74,46 @@ class RabbitMQProducer(BaseRabbitMQ):
             Tuple indicating success status and task ID.
         """
         routing_key = routing_key or queue_name
-        delivery_mode = (
-            aio_pika.DeliveryMode.PERSISTENT
-            if durable
-            else aio_pika.DeliveryMode.NOT_PERSISTENT
-        )
+        delivery_mode = aio_pika.DeliveryMode.PERSISTENT if durable else aio_pika.DeliveryMode.NOT_PERSISTENT
         timestamp = datetime.now()
-        task_id = str(uuid4())
+        # Preserve provided task_id (for tracking or retry scenarios) or generate a new one
+        task_id = task_id or str(uuid4())
+
+        # Update headers
+        headers = headers or {}
+        headers["task_id"] = task_id
 
         if self.channel is None:
-            logger.error("[-] Cannot publish message: Channel is not established")
+            logger.error(
+                "[-] Cannot publish message: Channel is not established. "
+                "Did you forget to connect? Call `aconnect()` first."
+            )
             return (False, task_id)
 
         try:
             # Create and publish the message
-            body = json.dumps(message.model_dump()).encode()
+            # Handle both Pydantic models and plain dicts
+            body_dict = message.model_dump() if hasattr(message, "model_dump") else message
+            body = json.dumps(body_dict).encode()
             rabbitmq_message = aio_pika.Message(
                 body=body,
                 content_type="application/json",
                 delivery_mode=delivery_mode,
                 correlation_id=request_id,
                 timestamp=timestamp,
-                headers={"task_id": task_id},
+                headers={"task_id": task_id, **(headers or {})},
             )
-            await self.channel.default_exchange.publish(
-                rabbitmq_message, routing_key=routing_key
-            )
+            await self.channel.default_exchange.publish(rabbitmq_message, routing_key=routing_key)
 
             logger.info(f"[+] Published message to queue '{queue_name}': {message}")
             return (True, task_id)
 
         except aio_pika.exceptions.AMQPException as e:
-            logger.error(
-                f"[-] AMQP error while publishing to queue '{queue_name}': {e}"
-            )
+            logger.error(f"[-] AMQP error while publishing to queue '{queue_name}': {e}")
             return (False, task_id)
 
         except (json.JSONDecodeError, TypeError, UnicodeEncodeError) as e:
-            logger.error(
-                f"[-] Serialization error while publishing to queue '{queue_name}': {e}"
-            )
+            logger.error(f"[-] Serialization error while publishing to queue '{queue_name}': {e}")
             return (False, task_id)
 
         except Exception as e:
@@ -164,7 +170,5 @@ class RabbitMQProducer(BaseRabbitMQ):
                 task_ids.append(str(uuid4()))
                 continue
 
-        logger.info(
-            f"Batch publish completed: {messages_sent}/{len(messages)} messages sent"
-        )
+        logger.info(f"Batch publish completed: {messages_sent}/{len(messages)} messages sent")
         return (messages_sent, task_ids)

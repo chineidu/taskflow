@@ -23,8 +23,11 @@ Each section outlines a specific architectural choice, the rationale behind it, 
   - [Rate Limiting Strategy](#rate-limiting-strategy)
   - [Logging & Debugging Strategy](#logging--debugging-strategy)
   - [Resilience Strategy](#resilience-strategy)
-    - [Dead-Letter Queue DLQ for Failed Messages](#dead-letter-queue-dlq-for-failed-messages)
+    - [Infrastructure vs Business Logic Errors](#infrastructure-vs-business-logic-errors)
+    - [Dead-Letter Queue DLQ](#dead-letter-queue-dlq)
     - [Retry Backoff Strategy](#retry-backoff-strategy)
+      - [Initial Approach](#initial-approach)
+      - [Final Approach](#final-approach)
 
 <!-- /TOC -->
 
@@ -113,18 +116,39 @@ Internally, `dataclasses` with `slots=True` are used to avoid the "validation ta
 
 ## Resilience Strategy
 
-### Dead-Letter Queue (DLQ) for Failed Messages
+### Infrastructure vs Business Logic Errors
 
-- **Decision**: Implemented a Dead-Letter Queue (DLQ) for messages that exceed retry limits.
+- **Infrastructure Errors**: Transient issues outside developer control (e.g., API downtime, DB timeouts).
+  - Strategy: Route failed message to a `wait` queue with TTL (no consumers attached) to allow infrastructure time to recover, preventing immediate requeue floods.
+
+- **Business Logic Errors**: Bugs or invalid data in code (e.g., ValueError, logic errors).
+  - Strategy: Send directly to Dead-Letter Queue (DLQ) for human review. No retries, as they cannot resolve the issue.
+
+### Dead-Letter Queue (DLQ)
+
+- **Decision**: Added DLQ for messages exceeding retry limits.
 - **Rationale**:
-  - **Message Durability**: Ensures that messages that cannot be processed after a defined number of retries are not lost but instead routed to a DLQ for further inspection.
-  - **Poison Message Handling**: Prevents poison messages from clogging the main processing queue, allowing for smoother operation and easier debugging. (These messages are acknowledged and NOT requeued.)
-- **Implementation**: Configured RabbitMQ producer to set `x-dead-letter-exchange` on the main queue, directing failed messages to the DLQ after exceeding the retry threshold defined in the configuration.
+  - Preserves undeliverable messages for inspection.
+  - Isolates poison messages, preventing main queue blockage.
+  - Failed messages are acknowledged (not requeued).
+- **Implementation**: Main queue configured with `x-dead-letter-exchange` to route exhausted retries to DLQ.
 
 ### Retry Backoff Strategy
 
-- **Decision**: Implemented exponential backoff for message retries.
+#### Initial Approach
+
+- In-memory exponential backoff in consumer code.
+- Rationale: Avoids thundering herd on transient failures; gives issues time to resolve.
+
+#### Final Approach
+
+- **Decision**: Moved retry logic to RabbitMQ using TTL + dead-letter routing.
 - **Rationale**:
-  - **System Stability**: Prevents overwhelming the system with rapid retry attempts, especially during transient failures.
-  - **Improved Success Rates**: Allows time for temporary issues (e.g., network glitches, service unavailability) to resolve before retrying message processing.
-- **Implementation**: Configured the consumer to wait for an exponentially increasing delay (e.g., 2^n seconds) before each retry attempt, where `n` is the number of previous attempts, up to a maximum delay threshold.
+  - Keeps consumers stateless and simple.
+  - Centralizes retry timing and state.
+  - Survives worker restarts/scaling.
+- **Implementation**:
+  - Created `wait` queue with `x-message-ttl`.
+  - On failure, publish message to `wait` queue with retry count in headers.
+  - After TTL expires, message dead-letters back to main queue.
+  - After max retries, message routes to DLQ.

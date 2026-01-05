@@ -11,6 +11,7 @@ config:
     dlq_config:
       dlq_name: task_queue_dlq
       dlx_name: task_queue_dlx
+      ttl: 30000  # 30 seconds
     message_retries: 3
     retry_backoff_delay: 2
 

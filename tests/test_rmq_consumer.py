@@ -51,6 +51,7 @@ class TestRabbitMQConsumer:
         # queue.iterator() is a sync method returning an async context manager
         mock_queue.iterator = MagicMock()
         consumer.aensure_queue = AsyncMock(return_value=mock_queue)
+        consumer.aensure_dlq = AsyncMock()
 
         # Mock message
         mock_message = AsyncMock(spec=aio_pika.IncomingMessage)
@@ -110,7 +111,16 @@ class TestRabbitMQConsumer:
             await consumer.consume(queue_name="test_queue", callback=callback)
 
             # Assertions
-            consumer.aensure_queue.assert_called_once_with(queue_name="test_queue", durable=True)
+            # Verify DLQ is ensured
+            consumer.aensure_dlq.assert_called_once()
+
+            # Verify queue is ensured with DLX arguments
+            consumer.aensure_queue.assert_called_once()
+            call_args = consumer.aensure_queue.call_args
+            assert call_args.kwargs["queue_name"] == "test_queue"
+            assert call_args.kwargs["durable"] is True
+            assert "x-dead-letter-exchange" in call_args.kwargs["arguments"]
+
             callback.assert_called_once_with({"data": "test"})
 
             # Verify DB updates
@@ -139,6 +149,7 @@ class TestRabbitMQConsumer:
         # queue.iterator() is a sync method returning an async context manager
         mock_queue.iterator = MagicMock()
         consumer.aensure_queue = AsyncMock(return_value=mock_queue)
+        consumer.aensure_dlq = AsyncMock()
 
         # Mock message
         mock_message = AsyncMock(spec=aio_pika.IncomingMessage)
@@ -196,6 +207,7 @@ class TestRabbitMQConsumer:
 
             # Assertions
             callback.assert_called_once()
+            consumer.aensure_dlq.assert_called_once()
 
             # Verify DB updates - should be FAILED
             mock_repo_instance.aupdate_task_status.assert_any_call(
@@ -221,6 +233,7 @@ class TestRabbitMQConsumer:
         # queue.iterator() is a sync method returning an async context manager
         mock_queue.iterator = MagicMock()
         consumer.aensure_queue = AsyncMock(return_value=mock_queue)
+        consumer.aensure_dlq = AsyncMock()
 
         # Mock message with invalid JSON
         mock_message = AsyncMock(spec=aio_pika.IncomingMessage)
@@ -251,3 +264,4 @@ class TestRabbitMQConsumer:
         # Assertions
         # Callback should NOT be called
         callback.assert_not_called()
+        consumer.aensure_dlq.assert_called_once()

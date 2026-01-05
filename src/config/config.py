@@ -17,6 +17,7 @@ class QueueNames:
 class DLQConfig:
     dlq_name: str = field(metadata={"description": "Name of the dead-letter queue"})
     dlx_name: str = field(metadata={"description": "Name of the dead-letter exchange"})
+    ttl: int = field(metadata={"description": "Time-to-live for messages in milliseconds"})
 
 
 @dataclass(slots=True, kw_only=True)
