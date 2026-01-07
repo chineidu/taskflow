@@ -57,6 +57,7 @@ api-run:
 		read -r confirm; \
 		if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
 			PORT=$(PORT) $(MAKE) kill-port; \
+			PORT=$(PORT) $(MAKE) check-port || { echo "🛑 Port $(PORT) still busy after kill attempt."; exit 1; }; \
 		else \
 			echo; \
 			echo "🛑 Aborted. Free port $(PORT) manually or use a different port."; \
@@ -67,13 +68,14 @@ api-run:
 	@uv run -m src.api.app --workers $(WORKERS) 
 
 api-run-gunicorn:
-	@echo "🚀 Starting FastAPI server on http://localhost:$(PORT) with Gunicorn"
+	@echo "🚀 Starting FastAPI server on http://localhost:$(PORT)"
 	@PORT=$(PORT) $(MAKE) check-port || { \
 		echo; \
 		echo -n "❓ Port $(PORT) is in use. Kill and continue? (y/N) "; \
 		read -r confirm; \
 		if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
 			PORT=$(PORT) $(MAKE) kill-port; \
+			PORT=$(PORT) $(MAKE) check-port || { echo "🛑 Port $(PORT) still busy after kill attempt."; exit 1; }; \
 		else \
 			echo; \
 			echo "🛑 Aborted. Free port $(PORT) manually or use a different port."; \
@@ -98,15 +100,17 @@ consumer-run:
 # Default port is 8000; can be overridden like `make check-port PORT=5000`
 PORT ?= 8000
 
-# Check if a port is in use
-# Usage:
-#   make check-port           # checks default port 8000
-#   make check-port PORT=5000 # checks port 5000
 # Check if a port is in use (exit 0 if free, 1 if in use)
 # Usage in scripts: `make check-port || echo "port busy"`
 check-port:
 	@echo "🔍 Checking if port $(PORT) is in use..."
-	@lsof -i :$(PORT) >/dev/null 2>&1 && (echo "⚠️  Port $(PORT) is in use"; exit 1) || (echo "✅ Port $(PORT) is free"; exit 0)
+	@if lsof -i :$(PORT) >/dev/null 2>&1; then \
+		echo "⚠️  Port $(PORT) is in use"; \
+		exit 1; \
+	else \
+		echo "✅ Port $(PORT) is free"; \
+		exit 0; \
+	fi
 
 # Kill the process using a port
 # Usage:
@@ -118,8 +122,17 @@ kill-port:
 		PID=$$(lsof -ti :$(PORT)); \
 		echo "Killing process $$PID on port $(PORT)"; \
 		kill -9 $$PID; \
+		sleep 1; \
+		if lsof -i :$(PORT) >/dev/null 2>&1; then \
+			echo "⚠️  Port $(PORT) still in use after kill attempt."; \
+			exit 1; \
+		else \
+			echo "✅ Port $(PORT) freed."; \
+			exit 0; \
+		fi; \
 	else \
-		echo "✅ No process is using port $(PORT)"; \
+		echo "ℹ️  No process using port $(PORT)."; \
+		exit 0; \
 	fi
 
 .PHONY: test test-verbose

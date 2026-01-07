@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
@@ -10,29 +11,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from src.schemas.types import EnvironmentEnum
 
 
-class BaseSettingsConfig(BaseSettings):
-    """Base configuration class for settings.
-
-    This class extends BaseSettings to provide common configuration options
-    for environment variable loading and processing.
-
-    Attributes
-    ----------
-    model_config : SettingsConfigDict
-        Configuration dictionary for the settings model specifying env file location,
-        encoding and other processing options.
-    """
-
-    model_config = SettingsConfigDict(
-        env_file=str(Path(".env").absolute()),
-        env_file_encoding="utf-8",
-        from_attributes=True,
-        populate_by_name=True,
-        str_strip_whitespace=True,
-    )
-
-
-class Settings(BaseSettingsConfig):
+class BaseConfig(BaseSettings):
     """Application settings class containing database and other credentials."""
 
     # ===== API SERVER =====
@@ -189,7 +168,66 @@ class Settings(BaseSettingsConfig):
         return url
 
 
-def refresh_settings() -> Settings:
+def setup_env() -> None:
+    """Sets environment variables for Together AI and OpenRouter clients."""
+    pass
+
+class DevelopmentConfig(BaseConfig):
+    """Development environment settings."""
+
+    model_config = SettingsConfigDict(
+        env_file=str(Path(".env").absolute()),
+        env_file_encoding="utf-8",
+        from_attributes=True,
+        populate_by_name=True,
+        str_strip_whitespace=True,
+    )
+
+    ENVIRONMENT: EnvironmentEnum = EnvironmentEnum.DEVELOPMENT
+    WORKERS: int = 1
+    LIMIT_VALUE: int = 20
+    RELOAD: bool = True
+    DEBUG: bool = True
+
+
+class SandboxConfig(BaseConfig):
+    """Sandbox environment settings."""
+
+    model_config = SettingsConfigDict(
+        env_file=str(Path(".env.sandbox").absolute()),
+        env_file_encoding="utf-8",
+        from_attributes=True,
+        populate_by_name=True,
+        str_strip_whitespace=True,
+    )
+
+    ENV: EnvironmentEnum = EnvironmentEnum.SANDBOX
+    WORKERS: int = 1
+    LIMIT_VALUE: int = 30
+    RELOAD: bool = False
+    DEBUG: bool = False
+
+
+class ProductionConfig(BaseConfig):
+    """Production environment settings."""
+
+    model_config = SettingsConfigDict(
+        env_file=str(Path(".env.prod").absolute()),
+        env_file_encoding="utf-8",
+        from_attributes=True,
+        populate_by_name=True,
+        str_strip_whitespace=True,
+    )
+
+    ENV: EnvironmentEnum = EnvironmentEnum.PRODUCTION
+    WORKERS: int = 2
+    LIMIT_VALUE: int = 60
+    RELOAD: bool = False
+    DEBUG: bool = False
+
+type ConfigType = DevelopmentConfig | ProductionConfig | SandboxConfig
+
+def refresh_settings() -> ConfigType:
     """Refresh environment variables and return new Settings instance.
 
     This function reloads environment variables from .env file and creates
@@ -197,19 +235,27 @@ def refresh_settings() -> Settings:
 
     Returns
     -------
-    Settings
-        A new Settings instance with refreshed environment variables
+    ConfigType
+        An instance of the appropriate Settings subclass based on the ENV variable.
     """
     load_dotenv(override=True)
-    return Settings()
+    # Determine environment type; `development` is the default
+    env_str = os.getenv("ENV", EnvironmentEnum.DEVELOPMENT.value)
+    env = EnvironmentEnum(env_str)
+
+    configs = {
+        EnvironmentEnum.DEVELOPMENT: DevelopmentConfig,
+        EnvironmentEnum.PRODUCTION: ProductionConfig,
+        EnvironmentEnum.SANDBOX: SandboxConfig,
+        # Map both SANDBOX and STAGING to SandboxConfig
+        EnvironmentEnum.STAGING: SandboxConfig,
+    }
+    config_cls: type[ConfigType] = configs.get(env, DevelopmentConfig)
+
+    return config_cls()  # type: ignore
 
 
-def setup_env() -> None:
-    """Sets environment variables for Together AI and OpenRouter clients."""
-    pass
-
-
-app_settings: Settings = refresh_settings()
+app_settings: ConfigType = refresh_settings()
 
 # Call setup_env only once at startup
 _setup_env_called: bool = False

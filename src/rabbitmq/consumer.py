@@ -71,6 +71,7 @@ class RabbitMQConsumer(BaseRabbitMQ):
         await self.aconnect()
         # Note: reusing the same connection from BaseRabbitMQ
         producer = RabbitMQProducer(self.config)  # Used for re-publishing retries
+        await producer.aconnect()  # Ensure producer is connected before use
         s3_service = S3StorageService()
 
         assert self.channel is not None, "Channel is not established."
@@ -182,7 +183,8 @@ class RabbitMQConsumer(BaseRabbitMQ):
                                     logger.info(f"[+] Task {task_id} COMPLETED successfully")
 
                                 except (ValueError, KeyError, TypeError) as biz_logic_err:
-                                    # Business logic error inside callback
+                                    # Business logic error inside callback. These errors are not retried 
+                                    # because they can't be fixed until manual fix is done
                                     logger.error(
                                         f"[x] Business logic error in task {task_id}: {biz_logic_err}"
                                     )
@@ -316,6 +318,8 @@ class RabbitMQConsumer(BaseRabbitMQ):
                         logger.error(
                             f"[x] Exhausted all retries for task_id={task_id}. Sending to dead-letter queue."
                         )
+                        # Reject with requeue=False to route via DLX to DLQ
+                        await message.nack(requeue=False)
 
 
 # ================ Example Usage ================

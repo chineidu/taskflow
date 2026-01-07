@@ -73,6 +73,13 @@ class RabbitMQProducer(BaseRabbitMQ):
         tuple[bool, str]
             Tuple indicating success status and task ID.
         """
+        if self.channel is None:
+            logger.debug("Channel not established, connecting...")
+            await self.aconnect()
+
+        if self.channel is None:
+            raise RuntimeError("[-] Failed to establish channel connection")
+            
         routing_key = routing_key or queue_name
         delivery_mode = aio_pika.DeliveryMode.PERSISTENT if durable else aio_pika.DeliveryMode.NOT_PERSISTENT
         timestamp = datetime.now()
