@@ -28,6 +28,7 @@ Each section outlines a specific architectural choice, the rationale behind it, 
     - [Retry Backoff Strategy](#retry-backoff-strategy)
       - [Initial Approach](#initial-approach)
       - [Final Approach](#final-approach)
+    - [Idempotent Manual Replays](#idempotent-manual-replays)
 
 <!-- /TOC -->
 
@@ -132,6 +133,7 @@ Internally, `dataclasses` with `slots=True` are used to avoid the "validation ta
   - Isolates poison messages, preventing main queue blockage.
   - Failed messages are acknowledged (not requeued).
 - **Implementation**: Main queue configured with `x-dead-letter-exchange` to route exhausted retries to DLQ.
+  - When message.nack(requeue=False) is called after max retries, message moves to DLQ.
 
 ### Retry Backoff Strategy
 
@@ -152,3 +154,15 @@ Internally, `dataclasses` with `slots=True` are used to avoid the "validation ta
   - On failure, publish message to `wait` queue with retry count in headers.
   - After TTL expires, message dead-letters back to main queue.
   - After max retries, message routes to DLQ.
+
+### Idempotent Manual Replays
+
+- **Decision**: Implemented idempotent retries for manual jobs replays in DLQ via API.
+- **Rationale**:
+  - Users may need to manually retry failed jobs without creating duplicates.
+  - Ensures system stability and data integrity during retries.
+  - **Implementation**:
+    - Added API endpoints for retrying individual jobs and batches.
+    - The retry count is reset on manual retries to allow fresh attempts.
+    - Instead of storing the entire message in memory while searching DLQ, a `temporary queue` is created to fetch and process messages one at a time, ensuring low memory usage even with large DLQs.
+

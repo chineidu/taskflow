@@ -2,7 +2,7 @@ from pydantic import ConfigDict, Field, field_validator
 
 from src import create_logger
 from src.schemas.base import BaseSchema
-from src.schemas.db.models import TaskModel
+from src.schemas.db.models import TaskModelSchema
 from src.schemas.rabbitmq.payload import RabbitMQPayload
 from src.schemas.types import TaskStatusEnum
 
@@ -63,7 +63,7 @@ class JobSubmissionResponseSchema(BaseSchema):
 class TasksResponseSchema(BaseSchema):
     """Schema for tasks response."""
 
-    tasks: list[TaskModel] = Field(default_factory=list, description="List of tasks.")
     total: int = Field(default=0, description="Total number of tasks matching the criteria.")
     limit: int = Field(default=10, description="Number of tasks per page.")
     offset: int = Field(default=0, description="Number of tasks to skip.")
+    tasks: list[TaskModelSchema] = Field(default_factory=list, description="List of tasks.")

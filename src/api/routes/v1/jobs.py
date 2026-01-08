@@ -1,4 +1,6 @@
-from typing import TYPE_CHECKING, Annotated
+"""API routes for job submission and retrieval."""
+
+from typing import TYPE_CHECKING, Annotated, Any
 
 from aiocache.factory import Cache
 from fastapi import APIRouter, Depends, Path, Request, status
@@ -14,22 +16,27 @@ from src.api.core.responses import MsgSpecJSONResponse
 from src.config import app_config
 from src.db.models import aget_db
 from src.db.repositories.task_repository import TaskRepository
-from src.schemas.db.models import TaskModel, TaskModelSchema, convert_task_model_to_response
+from src.schemas.db.models import TaskModelSchema
 from src.schemas.rabbitmq.payload import SubmittedJobResult
-from src.schemas.routes.job import (
+from src.schemas.routes.jobs import (
     InputSchema,
     JobSubmissionResponseSchema,
     TasksResponseSchema,
 )
 from src.schemas.types import TaskStatusEnum
-from src.services.producer import atrigger_job
+from src.services.producer import areplay_dlq_message_by_task_id, areplay_dlq_messages, atrigger_job
 
 if TYPE_CHECKING:
     from src.schemas.rabbitmq.payload import RabbitMQPayload
 
-logger = create_logger(name="routes.submit_job")
+logger = create_logger(name="routes.jobs")
 LIMIT_VALUE: int = app_config.api_config.ratelimit.default_rate
 router = APIRouter(tags=["jobs"], default_response_class=MsgSpecJSONResponse)
+
+
+# Order of routes matters here due to FastAPI's routing mechanism
+# Routes with path parameters should be defined BEFORE more general routes
+# OR you can use APIRouter with different prefixes to avoid conflicts.
 
 
 @router.post("/jobs", status_code=status.HTTP_200_OK)
@@ -55,8 +62,8 @@ async def submit_job(
         )
 
     # Store tasks in the database
-    tasks: list[TaskModel] = [
-        TaskModel(
+    tasks: list[TaskModelSchema] = [
+        TaskModelSchema(
             task_id=response.task_ids[i] if i < len(response.task_ids) else "unknown",
             payload={"message": message, "queue_name": queue_name},
             status=TaskStatusEnum.PENDING,
@@ -78,6 +85,92 @@ async def submit_job(
         number_of_messages=response.number_of_messages,
         status=TaskStatusEnum.PENDING,
     )
+
+
+@router.get("/jobs", status_code=status.HTTP_200_OK)
+@cached(ttl=300, key_prefix="job")  # type: ignore
+@limiter.limit(f"{LIMIT_VALUE}/minute")
+async def get_all_jobs(
+    request: Request,  # Required by SlowAPI  # noqa: ARG001
+    status: Annotated[TaskStatusEnum | None, Query(description="Filter by task status")] = None,
+    limit: Annotated[int, Query(description="Number of items per page", ge=1, le=100)] = 10,
+    offset: Annotated[int, Query(description="Number of items to skip", ge=0)] = 0,
+    db: AsyncSession = Depends(aget_db),
+    cache: Cache = Depends(aget_cache),  # Required by caching decorator  # noqa: ARG001
+) -> TasksResponseSchema:
+    """Route for fetching all tasks with pagination and optional status filtering."""
+    task_repo = TaskRepository(db=db)
+    # Use database-level pagination for better performance
+    _tasks, total = await task_repo.aget_tasks_paginated(
+        status=status,
+        limit=limit,
+        offset=offset,
+    )
+
+    tasks = [task_repo.convert_dbtask_to_schema(task) for task in _tasks]
+    tasks = [task for task in tasks if task is not None]
+
+    if not tasks:
+        logger.warning("[x] No tasks found matching the criteria")
+        raise ResourcesNotFoundError("tasks matching the criteria")
+
+    return TasksResponseSchema(
+        tasks=tasks,
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.post("/jobs/action/retry", status_code=status.HTTP_200_OK)
+@cached(ttl=300, key_prefix="job")  # type: ignore
+@limiter.limit(f"{LIMIT_VALUE}/minute")
+async def retry_batch_jobs(
+    request: Request,  # Required by SlowAPI  # noqa: ARG001
+    target_queue_name: Annotated[
+        str, Query(description="The target queue name to replay the message to")
+    ] = "task_queue",
+    max_messages: Annotated[int, Query(description="Maximum number of messages to search through")] = 1000,
+) -> dict[str, Any]:
+    """Route for retrying batch jobs from the Dead Letter Queue (DLQ) by task ID."""
+    # Use database-level pagination for better performance
+    result = await areplay_dlq_messages(
+        dlq_name="task_queue_dlq",
+        target_queue_name=target_queue_name,
+        max_messages=max_messages,
+    )
+
+    if not result.get("success", None):
+        logger.warning("[x] Failed to replay batch messages from DLQ")
+        raise ResourcesNotFoundError("batch messages in DLQ or replay failed")
+
+    return result
+
+
+@router.post("/jobs/action/{task_id}/retry", status_code=status.HTTP_200_OK)
+@cached(ttl=300, key_prefix="job")  # type: ignore
+@limiter.limit(f"{LIMIT_VALUE}/minute")
+async def retry_job(
+    request: Request,  # Required by SlowAPI  # noqa: ARG001
+    task_id: Annotated[str, Path(description="The ID of the task to retry.")],
+    target_queue_name: Annotated[
+        str, Query(description="The target queue name to replay the message to")
+    ] = "task_queue",
+    max_messages: Annotated[int, Query(description="Maximum number of messages to search through")] = 1000,
+) -> dict[str, Any]:
+    """Route for retrying a job from the Dead Letter Queue (DLQ) by task ID."""
+    result = await areplay_dlq_message_by_task_id(
+        dlq_name="task_queue_dlq",
+        target_queue_name=target_queue_name,
+        task_id=task_id,
+        max_messages=max_messages,
+    )
+
+    if not result.get("success", False):
+        logger.warning(f"[x] Failed to replay message with task_id={task_id}")
+        raise ResourcesNotFoundError(f"task '{task_id}' in DLQ or replay failed")
+
+    return result
 
 
 @router.get("/jobs/{task_id}", status_code=status.HTTP_200_OK)
@@ -102,38 +195,4 @@ async def get_job(
         logger.warning(f"[x] Task conversion failed: task_id={task_id}")
         raise ResourcesNotFoundError(f"task '{task_id}'")
 
-    return convert_task_model_to_response(task)
-
-
-@router.get("/jobs", status_code=status.HTTP_200_OK)
-@cached(ttl=300, key_prefix="job")  # type: ignore
-@limiter.limit(f"{LIMIT_VALUE}/minute")
-async def get_all_jobs(
-    request: Request,  # Required by SlowAPI  # noqa: ARG001
-    status: Annotated[TaskStatusEnum | None, Query(description="Filter by task status")] = None,
-    limit: Annotated[int, Query(description="Number of items per page", ge=1, le=100)] = 10,
-    offset: Annotated[int, Query(description="Number of items to skip", ge=0)] = 0,
-    db: AsyncSession = Depends(aget_db),
-    cache: Cache = Depends(aget_cache),  # Required by caching decorator  # noqa: ARG001
-) -> TasksResponseSchema:
-    """Route for fetching all tasks with pagination and optional status filtering."""
-    task_repo = TaskRepository(db=db)
-    # Use database-level pagination for better performance
-    _tasks, total = await task_repo.aget_tasks_paginated(
-        status=status,
-        limit=limit,
-        offset=offset,
-    )
-
-    tasks = [task_repo.convert_dbtask_to_schema(task) for task in _tasks]
-
-    if not tasks:
-        logger.warning("[x] No tasks found matching the criteria")
-        raise ResourcesNotFoundError("tasks matching the criteria")
-
-    return TasksResponseSchema(
-        tasks=tasks,
-        total=total,
-        limit=limit,
-        offset=offset,
-    )
+    return task

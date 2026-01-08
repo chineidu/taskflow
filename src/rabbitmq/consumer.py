@@ -178,12 +178,13 @@ class RabbitMQConsumer(BaseRabbitMQ):
 
                                     # Final State: SUCCESS
                                     await repo.aupdate_task_status(task_id, status=TaskStatusEnum.COMPLETED)
+                                    await repo.aupdate_dlq_status(task_id, in_dlq=False)
                                     # Acknowledge message and remove from queue
                                     await message.ack()
                                     logger.info(f"[+] Task {task_id} COMPLETED successfully")
 
                                 except (ValueError, KeyError, TypeError) as biz_logic_err:
-                                    # Business logic error inside callback. These errors are not retried 
+                                    # Business logic error inside callback. These errors are not retried
                                     # because they can't be fixed until manual fix is done
                                     logger.error(
                                         f"[x] Business logic error in task {task_id}: {biz_logic_err}"
@@ -275,7 +276,7 @@ class RabbitMQConsumer(BaseRabbitMQ):
                         # Route to `dead-letter queue` for later processing
                         if retry_count == MAX_RETRIES:
                             logger.error(
-                                f"[x] Infrastructure error persisted after {MAX_RETRIES} "
+                                f"[x] Infrastructure error persisted after {MAX_RETRIES} |"
                                 f"attempts for task_id={task_id}. Routing message to dead-letter queue."
                             )
                             # Raise to trigger message requeue
@@ -296,7 +297,7 @@ class RabbitMQConsumer(BaseRabbitMQ):
                     # Infra error is propagated here to trigger retry
                     if retry_count < MAX_RETRIES:
                         logger.warning(
-                            f"[x] Error processing task_id={task_id}. "
+                            f"[x] Error processing task_id={task_id}. \n"
                             f"Attempt {retry_count + 1}/{MAX_RETRIES}. "
                             f"Retrying via the Wait Queue..."
                         )
@@ -318,6 +319,20 @@ class RabbitMQConsumer(BaseRabbitMQ):
                         logger.error(
                             f"[x] Exhausted all retries for task_id={task_id}. Sending to dead-letter queue."
                         )
+                        # Update task status to FAILED before sending to DLQ
+                        # Re-using existing DB session from DB pool
+                        try:
+                            async with aget_db_session() as db:
+                                repo = TaskRepository(db)
+                                await repo.aupdate_task_status(
+                                    task_id,
+                                    status=TaskStatusEnum.FAILED,
+                                    error="Exhausted all retry attempts",
+                                )
+                                await repo.aupdate_dlq_status(task_id, in_dlq=True)
+                        except Exception as db_error:
+                            logger.error(f"[x] Failed to update task status for {task_id}: {db_error}")
+
                         # Reject with requeue=False to route via DLX to DLQ
                         await message.nack(requeue=False)
 

@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import (
 
 from src import create_logger
 from src.db.models import DBTask
-from src.schemas.db.models import TaskModel
+from src.schemas.db.models import TaskModelSchema
 from src.schemas.types import TaskStatusEnum
 
 logger = create_logger("crud")
@@ -168,7 +168,7 @@ class TaskRepository:
         result = await self.db.scalars(stmt)
         return list(result.all())
 
-    async def acreate_tasks(self, tasks: list[TaskModel]) -> None:
+    async def acreate_tasks(self, tasks: list[TaskModelSchema]) -> None:
         """Batch create tasks in the database."""
         try:
             db_tasks = [
@@ -193,7 +193,7 @@ class TaskRepository:
             await self.db.rollback()
             raise e
 
-    async def aupdate_task(self, task: TaskModel) -> None:
+    async def aupdate_task(self, task: TaskModelSchema) -> None:
         """Update a task in the database in a single round trip."""
 
         # Filter out fields that are None/excluded
@@ -223,7 +223,7 @@ class TaskRepository:
             await self.db.rollback()
             raise e
 
-    async def abatch_update_tasks(self, tasks: list[TaskModel]) -> None:
+    async def abatch_update_tasks(self, tasks: list[TaskModelSchema]) -> None:
         """Batch update tasks in the database."""
         task_ids = [task.task_id for task in tasks]
         existing_tasks = await self.aget_tasks_by_ids(task_ids)
@@ -343,32 +343,42 @@ class TaskRepository:
             await self.db.rollback()
             raise e
 
-    def convert_dbtask_to_schema(self, db_task: DBTask) -> TaskModel | None:
-        """Convert a DBTask object to a TaskModel object."""
+    async def aupdate_dlq_status(self, task_id: str, in_dlq: bool) -> None:
+        """Update the DLQ status of a task.
+
+        Parameters
+        ----------
+        task_id : str
+            The unique task identifier.
+        in_dlq : bool
+            Whether the task is currently in the Dead Letter Queue.
+
+        Raises
+        ------
+        Exception
+            If the update fails.
+        """
         try:
-            return TaskModel(
-                id=db_task.id,
-                task_id=db_task.task_id,
-                payload=db_task.payload,
-                status=TaskStatusEnum(db_task.status),
-                has_logs=db_task.has_logs,
-                log_s3_key=db_task.log_s3_key,
-                log_s3_url=db_task.log_s3_url,
-                # Safer way to handle the datetime -> str conversion
-                created_at=getattr(db_task.created_at, "isoformat", lambda **kwargs: None)(  # noqa: ARG005
-                    timespec="seconds"
-                ),
-                started_at=getattr(db_task.started_at, "isoformat", lambda **kwargs: None)(  # noqa: ARG005
-                    timespec="seconds"
-                ),
-                completed_at=getattr(db_task.completed_at, "isoformat", lambda **kwargs: None)(  # noqa: ARG005
-                    timespec="seconds"
-                ),
-                updated_at=getattr(db_task.updated_at, "isoformat", lambda **kwargs: None)(  # noqa: ARG005
-                    timespec="seconds"
-                ),
-                error_message=db_task.error_message,
+            stmt = (
+                update(DBTask)
+                .where(DBTask.task_id == task_id)
+                .values(
+                    in_dlq=in_dlq,
+                )
             )
+            await self.db.execute(stmt)
+            await self.db.commit()
+            logger.info(f"Updated DLQ status for task_id='{task_id}'. in_dlq={in_dlq}")
+
         except Exception as e:
-            logger.error(f"Error converting DBTask to TaskModel: {e}")
+            logger.error(f"Error updating DLQ status for task_id='{task_id}': {e}")
+            await self.db.rollback()
+            raise e
+
+    def convert_dbtask_to_schema(self, db_task: DBTask) -> TaskModelSchema | None:
+        """Convert a DBTask ORM object directly to a Pydantic response schema."""
+        try:
+            return TaskModelSchema.model_validate(db_task)
+        except Exception as e:
+            logger.error(f"Error converting DBTask to TaskModelSchema: {e}")
             return None

@@ -112,7 +112,7 @@ class RabbitMQProducer(BaseRabbitMQ):
             )
             await self.channel.default_exchange.publish(rabbitmq_message, routing_key=routing_key)
 
-            logger.info(f"[+] Published message to queue '{queue_name}': {message}")
+            logger.info(f"[+] Published message to queue '{queue_name}': {str(message)[:50]}...")
             return (True, task_id)
 
         except aio_pika.exceptions.AMQPException as e:

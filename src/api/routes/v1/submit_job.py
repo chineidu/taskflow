@@ -13,7 +13,7 @@ from src.db.models import aget_db
 from src.db.repositories.task_repository import TaskRepository
 from src.schemas.db.models import TaskModel
 from src.schemas.rabbitmq.payload import SubmittedJobResult
-from src.schemas.routes.job import InputSchema, JobSubmissionResponseSchema
+from src.schemas.routes.jobs import InputSchema, JobSubmissionResponseSchema
 from src.schemas.types import TaskStatusEnum
 from src.services.producer import atrigger_job
 

@@ -45,6 +45,7 @@ class DBTask(Base):
     has_logs: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     log_s3_key: Mapped[str] = mapped_column(String(255), nullable=True)
     log_s3_url: Mapped[str] = mapped_column(Text, nullable=True)
+    in_dlq: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=func.now())
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
