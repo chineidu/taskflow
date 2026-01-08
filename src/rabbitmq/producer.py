@@ -41,7 +41,7 @@ class RabbitMQProducer(BaseRabbitMQ):
 
     async def apublish(
         self,
-        message: RabbitMQPayload,
+        message: RabbitMQPayload | dict[str, Any],
         queue_name: str,
         routing_key: str | None = None,
         request_id: str | None = None,
@@ -53,7 +53,7 @@ class RabbitMQProducer(BaseRabbitMQ):
 
         Parameters
         ----------
-        message : RabbitMQPayload
+        message : RabbitMQPayload | dict[str, Any]
             The message payload to be sent.
         queue_name : str
             The name of the target RabbitMQ queue.
@@ -79,7 +79,7 @@ class RabbitMQProducer(BaseRabbitMQ):
 
         if self.channel is None:
             raise RuntimeError("[-] Failed to establish channel connection")
-            
+
         routing_key = routing_key or queue_name
         delivery_mode = aio_pika.DeliveryMode.PERSISTENT if durable else aio_pika.DeliveryMode.NOT_PERSISTENT
         timestamp = datetime.now()
@@ -108,7 +108,7 @@ class RabbitMQProducer(BaseRabbitMQ):
                 delivery_mode=delivery_mode,
                 correlation_id=request_id,
                 timestamp=timestamp,
-                headers={"task_id": task_id, **(headers or {})},
+                headers={"task_id": task_id, **headers},
             )
             await self.channel.default_exchange.publish(rabbitmq_message, routing_key=routing_key)
 

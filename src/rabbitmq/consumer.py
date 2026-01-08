@@ -16,6 +16,7 @@ from src.db.models import aget_db_session
 from src.db.repositories.task_repository import TaskRepository
 from src.rabbitmq.base import BaseRabbitMQ
 from src.rabbitmq.producer import RabbitMQProducer
+from src.rabbitmq.utilities import queue_result_on_completion
 from src.schemas.types import TaskStatusEnum
 from src.services.storage import S3StorageService
 
@@ -349,7 +350,8 @@ async def process_data_chunk(chunk_id: int, data: dict[str, Any]) -> None:  # no
     logger.debug(f"  [Sub-Task] Chunk {chunk_id} successfully transformed.")
 
 
-async def example_consumer_callback(message: dict[str, Any]) -> None:
+@queue_result_on_completion(queue_name="task_queue_results")
+async def example_consumer_callback(message: dict[str, Any]) -> dict[str, Any]:
     """
     Complex callback to test multi-level logging capture and S3 upload.
     """
@@ -357,7 +359,7 @@ async def example_consumer_callback(message: dict[str, Any]) -> None:
     task_data = message
 
     logger.info("🚀 Starting high-complexity execution...")
-    logger.info(f"Target Payload: {json.dumps(task_data, indent=2)}")
+    logger.info(f"Target Payload: {json.dumps(task_data, indent=2)[:70]}...")
 
     try:
         # Phase 1: Validation
@@ -385,6 +387,10 @@ async def example_consumer_callback(message: dict[str, Any]) -> None:
         end_time = time.perf_counter()
         duration = end_time - start_time
         logger.info(f"🏁 Task execution finished successfully in {duration:.2f} seconds.")
+        return {
+            "status": "success",
+            "result": {k: f"{v}" * 2 for k, v in task_data.items()},
+        }
 
     except Exception as e:
         logger.exception(f"💥 Fatal error during callback execution: {str(e)}")
@@ -460,7 +466,7 @@ async def run_worker(callback: CONSUMER_CALLBACK_FN) -> None:
         raise
 
 
-async def main(callback: Callable[[dict[str, Any]], Awaitable[None]]) -> None:
+async def main(callback: CONSUMER_CALLBACK_FN) -> None:
     """Entry point to run the consumer with S3 bucket check.
 
     Parameters

@@ -1,0 +1,195 @@
+import asyncio
+from functools import wraps
+from typing import Any, Awaitable, Callable, ParamSpec, TypeVar, overload
+
+from src import create_logger
+from src.config.config import app_config
+from src.rabbitmq.producer import RabbitMQProducer
+
+logger = create_logger("rabbitmq.utilities")
+
+# --------- Decorator for automatic queue publishing on function completion --------- #
+# Type variables for better type hints
+P = ParamSpec("P")
+R = TypeVar("R")
+
+
+@overload
+def queue_result_on_completion(
+    func: Callable[P, Awaitable[R]],
+    *,
+    queue_name: str | None = None,
+    dlq_name: str | None = None,
+    task_id_key: str | None = None,
+) -> Callable[P, Awaitable[R]]:
+    # Called without parameters. e.g. @queue_result_on_completion
+    ...
+
+
+@overload
+def queue_result_on_completion(
+    func: None = None,
+    *,
+    queue_name: str | None = None,
+    dlq_name: str | None = None,
+    task_id_key: str | None = None,
+) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
+    ...
+    # Called with parameters. e.g. @queue_result_on_completion(queue_name="results_queue")
+
+
+def queue_result_on_completion(
+    func: Callable[P, Awaitable[R]] | None = None,
+    *,
+    queue_name: str | None = None,
+    dlq_name: str | None = None,
+    task_id_key: str | None = None,
+) -> Callable[P, Awaitable[R]] | Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
+    """Decorator to automatically publish function results to a RabbitMQ queue.
+
+    Parameters
+    ----------
+    queue_name : str | None, optional
+        The name of the RabbitMQ queue to publish results to.
+    dlq_name : str | None, optional
+        The name of the Dead Letter Queue (DLQ) for error handling. If not provided, defaults to
+        '{queue_name}_dlq'.
+    task_id_key : str | None, optional
+        The key in the result dict to use as the task ID. If not provided, defaults to None.
+
+    Returns
+    -------
+    Callable[[Callable[P, Any]], Callable[P, Any]]
+        A decorator that wraps the target function to publish its result or error to the specified queues.
+
+    Raises
+    ------
+    Exception
+        Re-raises any exception from the decorated function after publishing to DLQ.
+
+    Examples
+    --------
+    Async function example:
+    >>> @queue_result_on_completion(queue_name="results_queue")
+    >>> async def process_task(data: dict[str, Any]) -> dict[str, Any]:
+    ...     result = await some_processing(data)
+    ...     return {"task_id": "123", "status": "completed", "result": result}
+
+    Sync function example:
+    >>> @queue_result_on_completion(queue_name="results_queue", dlq_name="errors_queue")
+    >>> def sync_process(data: dict[str, Any]) -> dict[str, Any]:
+    ...     return {"task_id": "456", "status": "processed"}
+    """
+
+    queue_name = queue_name if queue_name else "default_queue"
+    dlq_name = dlq_name if dlq_name else f"{queue_name}_dlq"
+
+    def decorator(f: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
+        if asyncio.iscoroutinefunction(f):
+
+            @wraps(f)
+            async def awrapper(*args: P.args, **kwargs: P.kwargs) -> Any:
+                """Wrapper for async functions."""
+                producer = RabbitMQProducer(config=app_config)
+
+                try:
+                    # Execute the function
+                    result = await f(*args, **kwargs)
+                    payload = result if isinstance(result, dict) else {"result": result}
+
+                    # Publish the result to the specified queue
+                    async with producer.aconnection_context():
+                        await producer.aensure_queue(queue_name=queue_name, durable=True)
+
+                        success, task_id = await producer.apublish(
+                            message=payload,
+                            queue_name=queue_name,
+                            task_id=task_id_key,
+                            durable=True,
+                        )
+                        logger.info(f"[+] Published result to '{queue_name}': task_id={task_id}")
+                    return result
+
+                except Exception as e:
+                    logger.error(f"[x] Function '{f.__name__}' failed: {str(e)}")
+
+                    # Publish error to DLQ
+                    async with producer.aconnection_context():
+                        await producer.aensure_queue(queue_name=dlq_name, durable=True)
+
+                        error_payload = {
+                            "error": str(e),
+                            "function_name": f.__name__,
+                            "exception_type": type(e).__name__,
+                        }
+
+                        await producer.apublish(
+                            message=error_payload,
+                            queue_name=dlq_name,
+                            task_id="error_unknown",
+                        )
+                        logger.error(f"[x] Published error to DLQ '{dlq_name}'")
+                    raise
+
+            return awrapper
+
+        #     # Otherwise, it's a sync function
+        @wraps(f)
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> Any:
+            """Wrapper for sync functions."""
+            producer = RabbitMQProducer(config=app_config)
+
+            try:
+                # Execute the function
+                result = f(*args, **kwargs)
+                payload = result if isinstance(result, dict) else {"result": result}
+
+                # Publish the result to the specified queue
+                async def _publish_success() -> None:
+                    async with producer.aconnection_context():
+                        await producer.aensure_queue(queue_name=queue_name, durable=True)
+
+                        success, task_id = await producer.apublish(
+                            message=payload,
+                            queue_name=queue_name,
+                            task_id=task_id_key,
+                            durable=True,
+                        )
+                        logger.info(f"[+] Published result to '{queue_name}': task_id={task_id}")
+
+                # Run the async publish in the event loop
+                asyncio.run(_publish_success())
+                return result
+
+            except Exception as e:
+                logger.error(f"[x] Function '{f.__name__}' failed: {str(e)}")
+
+                # Publish error to DLQ
+                async def _publish_error(e: Exception) -> None:
+                    async with producer.aconnection_context():
+                        await producer.aensure_queue(queue_name=dlq_name, durable=True)
+
+                        error_payload = {
+                            "error": str(e),
+                            "function_name": f.__name__,
+                            "exception_type": type(e).__name__,
+                        }
+
+                        await producer.apublish(
+                            message=error_payload,
+                            queue_name=dlq_name,
+                            task_id="error_unknown",
+                        )
+                        logger.error(f"[x] Published error to DLQ '{dlq_name}'")
+
+                asyncio.run(_publish_error(e))
+                raise
+
+        return wrapper
+
+    # Called with parameters
+    if func is None:
+        return decorator
+
+    # Called without parameters
+    return decorator(func)
