@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from src.config.config import AppConfig
 
 
-logger = create_logger("producer")
+logger = create_logger("rabbitmq.producer")
 RABBITMQ_URL: str = app_settings.rabbitmq_url
 
 

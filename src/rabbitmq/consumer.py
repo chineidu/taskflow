@@ -23,7 +23,7 @@ from src.services.storage import S3StorageService
 if TYPE_CHECKING:
     from src.config.config import AppConfig
 
-logger = create_logger("consumer")
+logger = create_logger("rabbitmq.consumer")
 RABBITMQ_URL: str = app_settings.rabbitmq_url
 MAX_RETRIES: int = app_config.rabbitmq_config.max_retries
 DELAY_BETWEEN_RETRIES: int = app_config.rabbitmq_config.retry_backoff_delay

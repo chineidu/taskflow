@@ -177,3 +177,5 @@ Internally, `dataclasses` with `slots=True` are used to avoid the "validation ta
   - Added `tasks_timeout` configuration parameter (default: 300 seconds).
   - Wrapped the main task processing logic in `asyncio.wait_for()` to enforce the timeout.
   - On timeout, the task is marked as `FAILED` with an appropriate error message logged
+  - **Stuck Tasks Cleanup**: A background script (`tasks_cleanup.py`) periodically removes tasks that have exceeded a defined expiration period (e.g., 6 minutes) to maintain database hygiene and prevent clutter from abandoned tasks.
+  

@@ -5,7 +5,7 @@ Async Database initialization utilities.
 from src import create_logger
 from src.db.models import Base, aget_db_pool
 
-logger = create_logger(name="db_init")
+logger = create_logger(name="db.init")
 
 
 async def ainit_db() -> None:

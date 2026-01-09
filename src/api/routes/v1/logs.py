@@ -22,7 +22,7 @@ from src.schemas.routes.logs import LogResponse
 if TYPE_CHECKING:
     from src.services.storage import S3StorageService
 
-logger = create_logger("logs_routes")
+logger = create_logger("routes.logs")
 LIMIT_VALUE: int = app_config.api_config.ratelimit.default_rate
 router = APIRouter(tags=["logs"], default_response_class=MsgSpecJSONResponse)
 

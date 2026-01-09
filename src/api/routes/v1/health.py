@@ -10,7 +10,7 @@ from src.api.core.responses import MsgSpecJSONResponse
 from src.config import app_config
 from src.schemas.routes.health import HealthStatusSchema
 
-logger = create_logger(name="health")
+logger = create_logger(name="routes.health")
 LIMIT_VALUE: int = app_config.api_config.ratelimit.default_rate
 router = APIRouter(tags=["health"], default_response_class=MsgSpecJSONResponse)
 
