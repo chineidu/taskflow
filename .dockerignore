@@ -1,0 +1,53 @@
+# Git
+.git
+.gitignore
+
+# CI/CD
+.codeclimate.yml
+.travis.yml
+.taskcluster.yml
+
+# Docker
+docker-compose.yml
+docker-compose.yaml
+.docker
+
+# Python cache and bytecode
+**/__pycache__
+**/*.py[cod]
+**/*$py.class
+*.so
+
+# Virtual environments
+.env/
+.venv/
+venv/
+env/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Testing
+.tox/
+.coverage
+.cache
+htmlcov/
+nosetests.xml
+coverage.xml
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Documentation builds
+docs/_build/
+
+# Build artifacts
+target/

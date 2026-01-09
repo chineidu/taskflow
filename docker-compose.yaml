@@ -1,4 +1,3 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/compose-spec/compose-spec/master/schema/compose-spec.json
 services:
   database:
     image: postgres:17.5-bookworm
@@ -57,7 +56,7 @@ services:
         read_only: true
     command: redis-server /usr/local/etc/redis/redis.conf
     healthcheck:
-      test: ["CMD", "redis-cli", "--requirepass", "redis", "ping"]
+      test: ["CMD", "redis-cli", "-a", "redis", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -86,12 +85,12 @@ services:
       - MINIO_ROOT_USER=${AWS_ACCESS_KEY_ID}
       - MINIO_ROOT_PASSWORD=${AWS_SECRET_ACCESS_KEY}
     ports:
-      - '9000:9000'
-      - '9001:9001'
+      - "9000:9000"
+      - "9001:9001"
     volumes:
       - minio-data:/data
     healthcheck:
-      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 30s
       timeout: 20s
       retries: 3
@@ -117,13 +116,46 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: python -m scripts.tasks_cleanup
+    # --- Note ---
+    # Use the command from `docker/run.sh` to run specific scripts.
+    # command: python -m scripts.tasks_cleanup
     env_file:
       - .env
-    volumes:
-      - ./:/app/
+    environment:
+      # Override database host for Docker networking
+      POSTGRES_HOST: database
     depends_on:
-      - database
+      database: # This service is the MOST important dependency
+        condition: service_healthy
+      local-rabbitmq:
+        condition: service_healthy
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m src.api.app
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # Override database host for Docker networking
+      RABBITMQ_HOST: local-rabbitmq
+      POSTGRES_HOST: database
+      REDIS_HOST: redis
+      MINIO_HOST: minio
+    depends_on:
+      database: # This service is the MOST important dependency
+        condition: service_healthy
+      local-rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      tasks_cleanup:
+        condition: service_started
     restart: unless-stopped
 
 # Named volumes ONLY!

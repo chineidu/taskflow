@@ -11,9 +11,6 @@ ENV UV_COMPILE_BYTECODE=1
 # Copy from the cache instead of linking since it's a mounted volume
 ENV UV_LINK_MODE=copy
 
-# Omit development dependencies
-ENV UV_NO_DEV=1
-
 # Set working directory for all subsequent commands
 WORKDIR /app
 
@@ -29,7 +26,7 @@ COPY pyproject.toml uv.lock ./
 
 # Install dependencies using cache mount to avoid re-downloading
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev
+    uv sync --frozen --no-dev
 
 # ==============================================================================
 # Stage 3: Production - Final lightweight image
