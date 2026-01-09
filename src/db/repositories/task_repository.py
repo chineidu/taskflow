@@ -4,7 +4,7 @@ Crud operations for the task repository.
 (Using SQLAlchemy ORM v2.x)
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from dateutil.parser import parse  # Very fast, handles ISO formats well
@@ -19,7 +19,7 @@ from src.db.models import DBTask
 from src.schemas.db.models import TaskModelSchema
 from src.schemas.types import TaskStatusEnum
 
-logger = create_logger("crud")
+logger = create_logger("repo.task_repository")
 
 
 class TaskRepository:
@@ -372,6 +372,53 @@ class TaskRepository:
 
         except Exception as e:
             logger.error(f"Error updating DLQ status for task_id='{task_id}': {e}")
+            await self.db.rollback()
+            raise e
+
+    async def acleanup_expired_tasks(self, timeout_seconds: int = 360) -> int:
+        """Cleanup tasks that have been in IN_PROGRESS state for too long. Add a small buffer
+        and markes them as FAILED.
+
+        Parameters
+        ----------
+        timeout_seconds : int
+            The threshold in seconds to consider a task as expired (default: 360 seconds).
+
+        Returns
+        -------
+        int
+            The number of tasks that were marked as FAILED due to expiration.
+            
+        Raises
+        ------
+        Exception
+            If the cleanup operation fails.
+        """
+        try:
+            threshold = datetime.now() - timedelta(seconds=timeout_seconds)
+            filter = (
+                DBTask.status == TaskStatusEnum.IN_PROGRESS.value,
+                # If the task has been IN_PROGRESS for longer than the threshold
+                DBTask.updated_at < threshold,
+            )
+            stmt = (
+                update(DBTask)
+                .where(*filter)
+                .values(
+                    status=TaskStatusEnum.FAILED.value,
+                    error_message="Task expired due to timeout.",
+                    completed_at=func.now(),
+                )
+            )
+            await self.db.execute(stmt)
+            count_stmt = select(func.count()).select_from(DBTask).where(*filter)
+            count = await self.db.scalar(count_stmt) or 0
+            await self.db.commit()
+            logger.info(f"Cleaned up {count} expired tasks from IN_PROGRESS state.")
+            return count
+
+        except Exception as e:
+            logger.error(f"Error cleaning up expired tasks: {e}")
             await self.db.rollback()
             raise e
 

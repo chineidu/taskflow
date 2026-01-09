@@ -144,10 +144,18 @@ class RabbitMQConsumer(BaseRabbitMQ):
                                 # ----------- Call the provided callback function -----------
                                 # Business logic execution happens here
                                 try:
+                                    # Task timeout enforcement
                                     if asyncio.iscoroutinefunction(callback):
-                                        await callback(message_dict)
+                                        await asyncio.wait_for(
+                                            callback(message_dict),
+                                            timeout=self.config.rabbitmq_config.tasks_timeout,
+                                        )
                                     else:
-                                        callback(message_dict)
+                                        # Convert sync function to async and run with timeout
+                                        _async_version = asyncio.to_thread(callback, message_dict)
+                                        await asyncio.wait_for(
+                                            _async_version, timeout=self.config.rabbitmq_config.tasks_timeout
+                                        )
 
                                     logger.removeHandler(task_handler)
                                     # Stop logging and save the file.
@@ -230,6 +238,17 @@ class RabbitMQConsumer(BaseRabbitMQ):
                                     logger.info(
                                         f"[+] Task {task_id} marked as FAILED due to business logic error"
                                     )
+
+                                except asyncio.TimeoutError as timeout_err:
+                                    logger.error(
+                                        f"[x] Task {task_id} timed out: {timeout_err} "
+                                        f"after {self.config.rabbitmq_config.tasks_timeout} seconds"
+                                    )
+                                    # Propagate to retry logic
+                                    raise Exception(
+                                        f"Task {task_id} timed out after "
+                                        f"{self.config.rabbitmq_config.tasks_timeout} seconds"
+                                    ) from timeout_err
 
                                 except Exception as callback_error:
                                     # Infrastructure or unknown error inside callback
@@ -378,7 +397,8 @@ async def example_consumer_callback(message: dict[str, Any]) -> dict[str, Any]:
 
         # Phase 3: External 'Service' simulation
         logger.info("Phase 3: Communicating with external AI service...")
-        await asyncio.sleep(0.5)
+        sleep_duration = random.uniform(0.5, 10)
+        await asyncio.sleep(sleep_duration)
         # Randomly simulate an 'insight' for the log
         confidence = random.uniform(0.85, 0.99)
         logger.info(f"🤖 AI Inference complete. Confidence Score: {confidence:.2%}")

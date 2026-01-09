@@ -29,6 +29,7 @@ Each section outlines a specific architectural choice, the rationale behind it, 
       - [Initial Approach](#initial-approach)
       - [Final Approach](#final-approach)
     - [Idempotent Manual Replays](#idempotent-manual-replays)
+    - [Job/Task Timeout Handling](#jobtask-timeout-handling)
 
 <!-- /TOC -->
 
@@ -166,3 +167,13 @@ Internally, `dataclasses` with `slots=True` are used to avoid the "validation ta
     - The retry count is reset on manual retries to allow fresh attempts.
     - Instead of storing the entire message in memory while searching DLQ, a `temporary queue` is created to fetch and process messages one at a time, ensuring low memory usage even with large DLQs.
 
+### Job/Task Timeout Handling
+
+- **Decision**: Introduced a configurable timeout for task processing.
+- **Rationale**:
+  - Prevents tasks from hanging indefinitely due to unforeseen issues (e.g., external service timeouts, infinite loops).
+  - Timeouts are treated as transient (retry worthy) failures, allowing for retries. To prevent infinite retry loops, a maximum retry limit is enforced.
+- **Implementation**:
+  - Added `tasks_timeout` configuration parameter (default: 300 seconds).
+  - Wrapped the main task processing logic in `asyncio.wait_for()` to enforce the timeout.
+  - On timeout, the task is marked as `FAILED` with an appropriate error message logged

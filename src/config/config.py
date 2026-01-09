@@ -36,6 +36,9 @@ class RabbitMQConfig:
     retry_backoff_delay: int = field(
         default=2, metadata={"description": "Backoff delay multiplier for message retries"}
     )
+    tasks_timeout: int = field(
+        default=300, metadata={"description": "Default timeout for task processing in seconds"}
+    )
 
 
 @dataclass(slots=True, kw_only=True)

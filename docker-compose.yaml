@@ -113,6 +113,19 @@ services:
       mc anonymous set private myminio/${AWS_S3_BUCKET};
       exit 0;
       "
+  tasks_cleanup:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m scripts.tasks_cleanup
+    env_file:
+      - .env
+    volumes:
+      - ./:/app/
+    depends_on:
+      - database
+    restart: unless-stopped
+
 # Named volumes ONLY!
 # Persist data outside the lifecycle of the container.
 volumes:

@@ -9,21 +9,44 @@ from src.rabbitmq.producer import RabbitMQProducer
 logger = create_logger("rabbitmq.utilities")
 
 # --------- Decorator for automatic queue publishing on function completion --------- #
-# Type variables for better type hints
 P = ParamSpec("P")
-R = TypeVar("R")
+
+# Separate type vars for sync and async functions
+SyncFunc = TypeVar("SyncFunc", bound=Callable[..., Any])
+AsyncFunc = TypeVar("AsyncFunc", bound=Callable[..., Awaitable[Any]])
 
 
 @overload
 def queue_result_on_completion(
-    func: Callable[P, Awaitable[R]],
+    func: SyncFunc,
     *,
     queue_name: str | None = None,
     dlq_name: str | None = None,
     task_id_key: str | None = None,
-) -> Callable[P, Awaitable[R]]:
+) -> SyncFunc:
     # Called without parameters. e.g. @queue_result_on_completion
     ...
+@overload
+def queue_result_on_completion(
+    func: AsyncFunc,
+    *,
+    queue_name: str | None = None,
+    dlq_name: str | None = None,
+    task_id_key: str | None = None,
+) -> AsyncFunc:
+    # Called without parameters. e.g. @queue_result_on_completion
+    ...
+
+@overload
+def queue_result_on_completion(
+    func: None = None,
+    *,
+    queue_name: str | None = None,
+    dlq_name: str | None = None,
+    task_id_key: str | None = None,
+) -> Callable[[AsyncFunc], AsyncFunc]:
+    ...
+    # Called with parameters. e.g. @queue_result_on_completion(queue_name="results_queue")
 
 
 @overload
@@ -33,18 +56,18 @@ def queue_result_on_completion(
     queue_name: str | None = None,
     dlq_name: str | None = None,
     task_id_key: str | None = None,
-) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
+) -> Callable[[SyncFunc], SyncFunc]:
     ...
     # Called with parameters. e.g. @queue_result_on_completion(queue_name="results_queue")
 
 
 def queue_result_on_completion(
-    func: Callable[P, Awaitable[R]] | None = None,
+    func: Callable[..., Any] | None = None,
     *,
     queue_name: str | None = None,
     dlq_name: str | None = None,
     task_id_key: str | None = None,
-) -> Callable[P, Awaitable[R]] | Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
+) -> Callable[..., Any]:
     """Decorator to automatically publish function results to a RabbitMQ queue.
 
     Parameters
@@ -84,7 +107,7 @@ def queue_result_on_completion(
     queue_name = queue_name if queue_name else "default_queue"
     dlq_name = dlq_name if dlq_name else f"{queue_name}_dlq"
 
-    def decorator(f: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
+    def decorator(f: Callable[P, Any]) -> Callable[P, Any]:
         if asyncio.iscoroutinefunction(f):
 
             @wraps(f)
@@ -133,7 +156,7 @@ def queue_result_on_completion(
 
             return awrapper
 
-        #     # Otherwise, it's a sync function
+        # Otherwise, it's a sync function
         @wraps(f)
         def wrapper(*args: P.args, **kwargs: P.kwargs) -> Any:
             """Wrapper for sync functions."""
