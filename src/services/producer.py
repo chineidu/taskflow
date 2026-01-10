@@ -60,6 +60,7 @@ async def atrigger_job(
                 queue_name=queue_name,
                 request_id=request_id,
                 routing_key=routing_key,
+                headers=headers,
             )
     else:
         # Use existing producer connection
@@ -75,6 +76,7 @@ async def atrigger_job(
             queue_name=queue_name,
             request_id=request_id,
             routing_key=routing_key,
+            headers=headers,
         )
 
     return SubmittedJobResult(task_ids=task_ids, number_of_messages=num_msgs)
