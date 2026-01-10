@@ -9,10 +9,11 @@ from sqlalchemy.ext.asyncio.session import AsyncSession
 
 from src import create_logger
 from src.api.core.cache import cached
-from src.api.core.dependencies import aget_cache, arequest_id_header_doc
+from src.api.core.dependencies import get_cache, get_producer, idempotency_key_header, request_id_header_doc
 from src.api.core.exceptions import HTTPError, ResourcesNotFoundError
 from src.api.core.ratelimit import limiter
 from src.api.core.responses import MsgSpecJSONResponse
+from src.api.utilities import generate_idempotency_key
 from src.config import app_config
 from src.db.models import aget_db
 from src.db.repositories.task_repository import TaskRepository
@@ -27,6 +28,7 @@ from src.schemas.types import TaskStatusEnum
 from src.services.producer import areplay_dlq_message_by_task_id, areplay_dlq_messages, atrigger_job
 
 if TYPE_CHECKING:
+    from src.rabbitmq.producer import RabbitMQProducer
     from src.schemas.rabbitmq.payload import RabbitMQPayload
 
 logger = create_logger(name="routes.jobs")
@@ -44,8 +46,10 @@ router = APIRouter(tags=["jobs"], default_response_class=MsgSpecJSONResponse)
 async def submit_job(
     request: Request,  # Required by SlowAPI  # noqa: ARG001
     data: InputSchema,
-    _=Depends(arequest_id_header_doc),  # noqa: ANN001
+    _=Depends(request_id_header_doc),  # noqa: ANN001
+    idem_key: str | None = Depends(idempotency_key_header),
     db: AsyncSession = Depends(aget_db),
+    producer: "RabbitMQProducer| None" = Depends(get_producer),
 ) -> JobSubmissionResponseSchema:
     """Route for submitting job for processing."""
     request_id: str = request.headers.get("X-Request-ID", "")
@@ -53,8 +57,26 @@ async def submit_job(
     messages: list["RabbitMQPayload"] = data.data
     queue_name: str = data.queue_name or "default_queue"
 
+    idempotency_key: str = (
+        idem_key if idem_key else generate_idempotency_key(payload=data.model_dump(), user_id=None)
+    )
+    print(f"[ ] Using idempotency_key={idempotency_key} for job submission")
+
+    # Check for existing tasks with the same idempotency key
+    # Append suffix to differentiate multiple messages
+    if existing_tasks := await task_repo.aget_tasks_by_idempotency_key(f"{idempotency_key}_"):
+        logger.info(f"[x] Duplicate job submission detected with idempotency_key={idempotency_key}")
+        return JobSubmissionResponseSchema(
+            task_ids=[task.task_id for task in existing_tasks],
+            number_of_messages=len(existing_tasks),
+            status=existing_tasks[0].status,
+            message="Duplicate job submission detected. Returning all existing tasks in the batch.",
+        )
+
+    headers: dict[str, str] = {"Idempotency-Key": idempotency_key}
+
     response: SubmittedJobResult = await atrigger_job(
-        messages=messages, queue_name=queue_name, request_id=request_id
+        messages=messages, queue_name=queue_name, request_id=request_id, producer=producer, headers=headers
     )
     if not response:
         raise HTTPError(
@@ -70,6 +92,7 @@ async def submit_job(
             has_logs=False,
             log_s3_key=None,
             log_s3_url=None,
+            idempotency_key=f"{idempotency_key}_{i}",
         )
         for i, message in enumerate(messages)
     ]
@@ -84,6 +107,7 @@ async def submit_job(
         task_ids=response.task_ids,
         number_of_messages=response.number_of_messages,
         status=TaskStatusEnum.PENDING,
+        message="Job submitted successfully.",
     )
 
 
@@ -96,7 +120,7 @@ async def get_all_jobs(
     limit: Annotated[int, Query(description="Number of items per page", ge=1, le=100)] = 10,
     offset: Annotated[int, Query(description="Number of items to skip", ge=0)] = 0,
     db: AsyncSession = Depends(aget_db),
-    cache: Cache = Depends(aget_cache),  # Required by caching decorator  # noqa: ARG001
+    cache: Cache = Depends(get_cache),  # Required by caching decorator  # noqa: ARG001
 ) -> TasksResponseSchema:
     """Route for fetching all tasks with pagination and optional status filtering."""
     task_repo = TaskRepository(db=db)
@@ -180,7 +204,7 @@ async def get_job(
     request: Request,  # Required by SlowAPI  # noqa: ARG001
     task_id: Annotated[str, Path(description="The ID of the task to retrieve.")],
     db: AsyncSession = Depends(aget_db),
-    cache: Cache = Depends(aget_cache),  # Required by caching decorator  # noqa: ARG001
+    cache: Cache = Depends(get_cache),  # Required by caching decorator  # noqa: ARG001
 ) -> TaskModelSchema:
     """Route for fetching task details."""
     task_repo = TaskRepository(db=db)

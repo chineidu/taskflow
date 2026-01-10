@@ -37,6 +37,16 @@ class TaskRepository:
             logger.error(f"Error fetching task by id '{task_id}': {e}")
             return None
 
+    async def aget_tasks_by_idempotency_key(self, idempotency_key: str) -> list[DBTask]:
+        """Get tasks by their idempotency key."""
+        try:
+            stmt = select(DBTask).where(DBTask.idempotency_key.like(f"{idempotency_key}%"))
+            result = await self.db.scalars(stmt)
+            return list(result.all())
+        except Exception as e:
+            logger.error(f"Error fetching task by idempotency key '{idempotency_key}': {e}")
+            return []
+
     async def aget_tasks_by_ids(self, task_ids: list[str]) -> list[DBTask]:
         """Get tasks by their task IDs."""
         try:
@@ -388,7 +398,7 @@ class TaskRepository:
         -------
         int
             The number of tasks that were marked as FAILED due to expiration.
-            
+
         Raises
         ------
         Exception

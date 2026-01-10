@@ -19,6 +19,8 @@ async def atrigger_job(
     queue_name: str,
     request_id: str,
     routing_key: str | None = None,
+    headers: dict[str, str] | None = None,
+    producer: RabbitMQProducer | None = None,
 ) -> SubmittedJobResult:
     """Trigger a job by publishing a message to the specified RabbitMQ queue.
 
@@ -30,18 +32,37 @@ async def atrigger_job(
         The name of the RabbitMQ queue to publish the message to.
     request_id : str
         The unique request identifier for tracking the job.
+    headers : dict[str, str] | None, optional
+        Optional headers to include with the message, by default None.
     routing_key : str, optional
         The routing key for the message, by default None.
+    producer : RabbitMQProducer | None, optional
+        An optional RabbitMQProducer instance. If not provided, a new instance will be created.
 
     Returns
     -------
     SubmittedJobResult
         An instance containing the task ID and number of messages published.
     """
+    if not producer:
+        producer = RabbitMQProducer(config=app_config)
 
-    producer = RabbitMQProducer(config=app_config)
-
-    async with producer.aconnection_context():
+        async with producer.aconnection_context():
+            await producer.aensure_queue(
+                queue_name=queue_name,
+                arguments={
+                    "x-dead-letter-exchange": app_config.rabbitmq_config.dlq_config.dlx_name,
+                },
+                durable=True,
+            )
+            num_msgs, task_ids = await producer.abatch_publish(
+                messages=messages,
+                queue_name=queue_name,
+                request_id=request_id,
+                routing_key=routing_key,
+            )
+    else:
+        # Use existing producer connection
         await producer.aensure_queue(
             queue_name=queue_name,
             arguments={

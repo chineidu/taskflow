@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio.session import AsyncSession
 
 from src import create_logger
 from src.api.core.cache import cached
-from src.api.core.dependencies import aget_cache, aget_storage_service
+from src.api.core.dependencies import get_cache, get_storage_service
 from src.api.core.exceptions import HTTPError, ResourcesNotFoundError
 from src.api.core.ratelimit import limiter
 from src.api.core.responses import MsgSpecJSONResponse
@@ -37,8 +37,8 @@ async def get_task_logs(
     request: Request,  # Required by SlowAPI  # noqa: ARG001
     task_id: Annotated[str, Path(description="The unique task identifier")],
     db: AsyncSession = Depends(aget_db),
-    storage_service: "S3StorageService" = Depends(aget_storage_service),
-    cache: Cache = Depends(aget_cache),  # Required by caching decorator  # noqa: ARG001
+    storage_service: "S3StorageService" = Depends(get_storage_service),
+    cache: Cache = Depends(get_cache),  # Required by caching decorator  # noqa: ARG001
 ) -> StreamingResponse:
     """Retrieve execution logs for a completed or failed task.
 

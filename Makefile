@@ -180,18 +180,24 @@ clean-cache:
 	@echo "✅ Cleanup complete"
 
 
-.PHONY: up down restart logs setup status clean-all
+.PHONY: up down build restart logs setup status clean-all
 # ===============================
 # =========== DOCKER ============
 # ===============================
 # Start all services
 up:
+	@echo "🚀 Starting all services..."
 	@chmod +x docker/init_databases.sh
 	docker-compose up -d
 
 # Stop all services
 down:
+	@echo "🛑 Stopping all services..."
 	docker-compose down
+
+build:
+	@echo "🔨 Building Docker images..."
+	docker-compose build
 
 # Restart services
 restart: down up
@@ -201,8 +207,8 @@ logs:
 	docker-compose logs -f
 
 # Setup from scratch
-setup: clean-all up
-	@echo "Setup complete! Services are running."
+setup: clean-all build up
+	@echo "✅ Setup complete! Services are running."
 
 # Check status
 status:

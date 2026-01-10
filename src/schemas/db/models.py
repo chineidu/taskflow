@@ -32,6 +32,8 @@ class TaskModelSchema(BaseSchema):
         default=False,
         description="Indicates if the task is currently in the Dead Letter Queue (DLQ).",
     )
+    idempotency_key: str = Field(description="Idempotency key to prevent duplicate task processing.")
+    # Timestamps
     created_at: datetime | None = Field(default=None, description="Timestamp when the task was created.")
     started_at: datetime | None = Field(
         default=None,

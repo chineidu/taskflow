@@ -134,6 +134,7 @@ class RabbitMQProducer(BaseRabbitMQ):
         routing_key: str | None = None,
         request_id: str | None = None,
         durable: bool = True,
+        headers: dict[str, str] | None = None,
     ) -> tuple[int, list[str]]:
         """Publish a batch of messages to RabbitMQ.
 
@@ -149,6 +150,8 @@ class RabbitMQProducer(BaseRabbitMQ):
             The request ID for the message for tracking, by default None
         durable : bool, optional
             Whether the queue should be durable, by default True
+        headers : dict[str, Any] | None, optional
+            Additional headers to include in the message, by default None.
 
         Returns
         -------
@@ -167,6 +170,7 @@ class RabbitMQProducer(BaseRabbitMQ):
                     routing_key=routing_key,
                     request_id=request_id,
                     durable=durable,
+                    headers=headers,
                 )
                 if success:
                     messages_sent += 1

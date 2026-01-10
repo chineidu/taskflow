@@ -35,7 +35,7 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[TestClient, None]:
     from slowapi import _rate_limit_exceeded_handler
     from slowapi.errors import RateLimitExceeded
 
-    from src.api.core.dependencies import aget_cache
+    from src.api.core.dependencies import get_cache
     from src.api.core.exceptions import BaseAPIError, api_error_handler
     from src.api.routes import health, jobs, logs
     from src.config import app_config
@@ -77,7 +77,7 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[TestClient, None]:
         return mock_cache
 
     test_app.dependency_overrides[aget_db] = override_get_db
-    test_app.dependency_overrides[aget_cache] = override_get_cache
+    test_app.dependency_overrides[get_cache] = override_get_cache
 
     # Include routers
     test_app.include_router(health.router, prefix=prefix)

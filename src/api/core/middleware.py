@@ -22,7 +22,9 @@ logger = create_logger(name="middleware")
 
 
 class RequestIDMiddleware(BaseHTTPMiddleware):
-    """Middleware to add a unique request ID to each incoming request."""
+    """Middleware to add a unique request ID to each incoming request.
+    The request ID is used for tracing and logging purposes.
+    """
 
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]

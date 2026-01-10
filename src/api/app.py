@@ -77,7 +77,7 @@ if __name__ == "__main__":
             "src.api.app:app",
             host=app_settings.HOST,
             port=app_settings.PORT,
-            workers=None,  # Will be handled by Gunicorn
+            workers=app_settings.WORKERS,
             reload=app_settings.RELOAD,
             loop="uvloop",  # Use uvloop for better async performance
         )

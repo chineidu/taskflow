@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, Request, status
 
 from src import create_logger
 from src.api.core.cache import cached
-from src.api.core.dependencies import aget_cache
+from src.api.core.dependencies import get_cache
 from src.api.core.exceptions import HTTPError
 from src.api.core.ratelimit import limiter
 from src.api.core.responses import MsgSpecJSONResponse
@@ -20,7 +20,7 @@ router = APIRouter(tags=["health"], default_response_class=MsgSpecJSONResponse)
 @limiter.limit(f"{LIMIT_VALUE}/minute")
 async def health_check(
     request: Request,  # Required by SlowAPI  # noqa: ARG001
-    cache: Cache = Depends(aget_cache),  # Required by caching decorator  # noqa: ARG001
+    cache: Cache = Depends(get_cache),  # Required by caching decorator  # noqa: ARG001
 ) -> HealthStatusSchema:
     """Route for health checks"""
     db_available = getattr(request.app.state, "db_available", False)

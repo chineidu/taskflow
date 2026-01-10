@@ -15,12 +15,10 @@ class BaseConfig(BaseSettings):
     """Application settings class containing database and other credentials."""
 
     # ===== API SERVER =====
-    ENVIRONMENT: EnvironmentEnum = EnvironmentEnum.DEVELOPMENT
+    ENV: EnvironmentEnum = EnvironmentEnum.DEVELOPMENT
     HOST: str = "0.0.0.0"
     PORT: int = 8000
     WORKERS: int = 1
-    RELOAD: bool = False
-    DEBUG: bool = False
 
     # ===== RABBITMQ =====
     RABBITMQ_USER: str = "guest"
@@ -162,7 +160,7 @@ class BaseConfig(BaseSettings):
             http(s)://host:port
         """
         scheme: Literal["http", "https"] = (
-            "https" if self.ENVIRONMENT == EnvironmentEnum.PRODUCTION else "http"
+            "https" if self.ENV == EnvironmentEnum.PRODUCTION else "http"
         )
         url: str = f"{scheme}://{self.AWS_S3_HOST}:{self.AWS_S3_PORT}"
         return url
@@ -242,6 +240,7 @@ def refresh_settings() -> ConfigType:
     # Determine environment type; `development` is the default
     env_str = os.getenv("ENV", EnvironmentEnum.DEVELOPMENT.value)
     env = EnvironmentEnum(env_str)
+    print(f"Loading configuration for environment: {env.value}")
 
     configs = {
         EnvironmentEnum.DEVELOPMENT: DevelopmentConfig,

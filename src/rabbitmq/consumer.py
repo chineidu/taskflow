@@ -5,6 +5,7 @@ import signal
 import sys
 import tempfile
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -110,8 +111,9 @@ class RabbitMQConsumer(BaseRabbitMQ):
                 headers: dict[str, Any] = message.headers or {}
                 task_id = str(headers.get("task_id", "unknown"))
                 correlation_id: str = message.correlation_id or "unknown"
-                timestamp = message.timestamp
+                timestamp: datetime | None = message.timestamp
                 retry_count: int = headers.get("x-retry-count", 0)
+                idempotency_key: str = headers.get("Idempotency-Key", "none")
 
                 logger.info(
                     f"[+] Received message | task_id={task_id} | "
@@ -128,6 +130,16 @@ class RabbitMQConsumer(BaseRabbitMQ):
                     try:
                         async with aget_db_session() as db:
                             repo = TaskRepository(db)
+                            # Check if idempotency key exists in the system
+                            if tasks := await repo.aget_tasks_by_idempotency_key(idempotency_key):
+                                logger.info(
+                                    f"[x] Duplicate message detected with idempotency_key={idempotency_key}. "
+                                    f"Acknowledging and skipping processing for task_id={tasks[0].task_id}"
+                                )
+                                # Acknowledge message to remove from queue
+                                await message.ack()
+                                continue
+
                             # Immediate State Change
                             await repo.aupdate_task_status(task_id, status=TaskStatusEnum.IN_PROGRESS)
                             logger.info(f"[*] Task {task_id} is now IN_PROGRESS")
@@ -166,7 +178,7 @@ class RabbitMQConsumer(BaseRabbitMQ):
                                             filepath=temp_path,
                                             task_id=task_id,
                                             correlation_id=correlation_id,
-                                            environment=app_settings.ENVIRONMENT,
+                                            environment=app_settings.ENV,
                                         )
                                         # Update logs info in DB
                                         s3_key = s3_service.get_object_name(task_id)
@@ -207,7 +219,7 @@ class RabbitMQConsumer(BaseRabbitMQ):
                                             filepath=temp_path,
                                             task_id=task_id,
                                             correlation_id=correlation_id,
-                                            environment=app_settings.ENVIRONMENT,
+                                            environment=app_settings.ENV,
                                         )
                                         # Update logs info in DB
                                         s3_key = s3_service.get_object_name(task_id)
@@ -263,7 +275,7 @@ class RabbitMQConsumer(BaseRabbitMQ):
                                             filepath=temp_path,
                                             task_id=task_id,
                                             correlation_id=correlation_id,
-                                            environment=app_settings.ENVIRONMENT,
+                                            environment=app_settings.ENV,
                                         )
                                         # Update logs info in DB
                                         s3_key = s3_service.get_object_name(task_id)

@@ -116,9 +116,9 @@ class TestClientLogRoutes:
         # The `client` fixture creates the app. We can't easily modify it here unless we access it.
         # But `client.app` gives access to the FastAPI app.
 
-        from src.api.core.dependencies import aget_storage_service
+        from src.api.core.dependencies import get_storage_service
 
-        client.app.dependency_overrides[aget_storage_service] = lambda: mock_storage  # type: ignore
+        client.app.dependency_overrides[get_storage_service] = lambda: mock_storage  # type: ignore
 
         response = client.get(f"/api/v1/{task_id}/logs")
 
@@ -126,7 +126,7 @@ class TestClientLogRoutes:
         assert response.content == b"log line 1\nlog line 2\n"
 
         # Clean up override
-        del client.app.dependency_overrides[aget_storage_service]  # type: ignore
+        del client.app.dependency_overrides[get_storage_service]  # type: ignore
 
     async def test_get_task_logs_no_logs(self, client: TestClient, db_session: AsyncSession) -> None:
         """Test retrieving logs for a task that has no logs."""

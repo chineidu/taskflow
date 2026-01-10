@@ -42,6 +42,9 @@ class JobSubmissionResponseSchema(BaseSchema):
     status: TaskStatusEnum = Field(
         default=TaskStatusEnum.PENDING, description="The status of the job submission."
     )
+    message: str | None = Field(
+        default=None, description="Optional message providing additional information."
+    )
 
     @field_validator("status", mode="after")
     @classmethod

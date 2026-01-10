@@ -137,7 +137,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: python -m src.api.app
+    command: >
+      python -m src.api.app
     ports:
       - "8000:8000"
     env_file:

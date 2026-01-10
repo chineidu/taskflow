@@ -9,8 +9,9 @@ from fastapi import FastAPI
 from src import create_logger
 from src.api.core.cache import setup_cache
 from src.api.core.ratelimit import limiter
-from src.config import app_settings
+from src.config import app_config, app_settings
 from src.db.init import ainit_db
+from src.rabbitmq.producer import RabbitMQProducer
 
 if TYPE_CHECKING:
     pass
@@ -28,7 +29,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:  # noqa: ARG001
     """
     try:
         start_time: float = time.perf_counter()
-        logger.info(f"ENVIRONMENT: {app_settings.ENVIRONMENT} | DEBUG: {app_settings.DEBUG} ")
+        logger.info(f"ENVIRONMENT: {app_settings.ENV} | DEBUG: {app_settings.DEBUG} ")
         logger.info("Starting up application and loading model...")
 
         # ====================================================
@@ -54,10 +55,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:  # noqa: ARG001
             logger.info("✅ Redis cache initialized successfully")
         except Exception as cache_error:
             logger.error("❌ Redis connection failed")
-            logger.error(f"   Error: {cache_error}")
-            logger.error(f"   Redis host => {app_settings.REDIS_HOST}:{app_settings.REDIS_PORT}")
-            logger.error("   Make sure Redis is running")
+            logger.error(f"Error: {cache_error}")
+            logger.error(f"Redis host => {app_settings.REDIS_HOST}:{app_settings.REDIS_PORT}")
+            logger.error("Make sure Redis is running")
             raise RuntimeError(f"Redis is required but unavailable: {cache_error}") from cache_error
+        # ---------- Setup RabbitMQ Producer ----------
+        try:
+            producer = RabbitMQProducer(config=app_config)
+            await producer.aconnect()
+            app.state.rmq_producer = producer
+            logger.info("✅ RabbitMQ producer initialized successfully")
+        except Exception as producer_error:
+            logger.error("❌ RabbitMQ producer initialization failed")
+            logger.error(f"Error: {producer_error}")
+            raise RuntimeError(
+                f"RabbitMQ producer is required but unavailable: {producer_error}"
+            ) from producer_error
 
         # ---------- Setup rate limiter ----------
         app.state.limiter = limiter

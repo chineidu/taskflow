@@ -30,6 +30,7 @@ Each section outlines a specific architectural choice, the rationale behind it, 
       - [Final Approach](#final-approach)
     - [Idempotent Manual Replays](#idempotent-manual-replays)
     - [Job/Task Timeout Handling](#jobtask-timeout-handling)
+    - [Idempotent Job Submissions](#idempotent-job-submissions)
 
 <!-- /TOC -->
 
@@ -178,4 +179,16 @@ Internally, `dataclasses` with `slots=True` are used to avoid the "validation ta
   - Wrapped the main task processing logic in `asyncio.wait_for()` to enforce the timeout.
   - On timeout, the task is marked as `FAILED` with an appropriate error message logged
   - **Stuck Tasks Cleanup**: A background script (`tasks_cleanup.py`) periodically removes tasks that have exceeded a defined expiration period (e.g., 6 minutes) to maintain database hygiene and prevent clutter from abandoned tasks.
+  
+### Idempotent Job Submissions
+
+- **Decision**: Enabled idempotent job submissions using idempotency keys.
+- **Rationale**:
+  - Prevents duplicate job creation in scenarios where clients may retry submissions due to network issues or timeouts.
+  - Ensures that multiple submissions with the same idempotency key return the same result without creating duplicate tasks.
+- **Implementation**:
+  - Each job submission requires a unique `idempotency_key`.
+  - The system checks for existing tasks with the same idempotency key (using a suffix added to the original key to handle batch submissions).
+  - If existing tasks are found, the API returns their IDs and status instead of creating new tasks.
+  - This logic is implemented in both the API route handling job submissions and the RabbitMQ consumer to ensure consistency across different submission methods.
   

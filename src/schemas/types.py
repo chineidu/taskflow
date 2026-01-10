@@ -24,6 +24,7 @@ class ResourceEnum(StrEnum):
     CACHE = "cache"
     DATABASE = "database"
     RATE_LIMITER = "rate_limiter"
+    RABBITMQ_PRODUCER = "rabbitmq_producer"
 
 
 class TaskStatusEnum(StrEnum):
