@@ -197,6 +197,9 @@ async def areplay_dlq_message_by_task_id(
     # ----- Temporary queue for searching -----
     # Instead of storing messages in memory (Python list), we use a temporary RabbitMQ queue
     # to hold messages that are not the target. This avoids high memory usage for large DLQs.
+    # This also prevents requeueing a message that was just moved from the DLQ back to itself.
+    # i.e. if the message is not the target, and we publish it back to the DLQ, it may be picked 
+    # up again in the same search loop, causing an infinite loop.
     temp_queue_name = f"temp_search_queue_{task_id}_{int(time.time())}"
     found: bool = False
 

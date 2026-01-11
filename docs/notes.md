@@ -31,6 +31,8 @@ Each section outlines a specific architectural choice, the rationale behind it, 
     - [Idempotent Manual Replays](#idempotent-manual-replays)
     - [Job/Task Timeout Handling](#jobtask-timeout-handling)
     - [Idempotent Job Submissions](#idempotent-job-submissions)
+    - [Chaos Engineering](#chaos-engineering)
+      - [Resuming Failed Tasks](#resuming-failed-tasks)
 
 <!-- /TOC -->
 
@@ -191,4 +193,16 @@ Internally, `dataclasses` with `slots=True` are used to avoid the "validation ta
   - The system checks for existing tasks with the same idempotency key (using a suffix added to the original key to handle batch submissions).
   - If existing tasks are found, the API returns their IDs and status instead of creating new tasks.
   - This logic is implemented in both the API route handling job submissions and the RabbitMQ consumer to ensure consistency across different submission methods.
+
+### Chaos Engineering
+
+#### Resuming Failed Tasks
+
+- **Decision**: Implemented chaos engineering tests to validate system resilience.
+- **Rationale**:
+  - To ensure the system can handle unexpected failures gracefully and maintain data integrity.
+  - To validate that tasks can be resumed or retried successfully after failures.
+- **Implementation**:
+  - Developed tests that simulate worker crashes mid-execution, verifying that tasks are requeued and successfully completed upon retry.
+  - The consumer checks the status of tasks before processing to ensure idempotency and prevent duplicate executions.
   

@@ -4,7 +4,7 @@ from src.db.repositories.task_repository import TaskRepository
 
 logger = create_logger("scripts.tasks_cleanup")
 TIMEOUT_SECONDS = 3600  # Define the timeout duration for task expiration
-SLEEP_SECONDS = 60  # Sleep duration to allow logger to flush
+SLEEP_SECONDS = 180  # Sleep duration to allow logger to flush
 
 async def arun_cleanup() -> None:
     """Asynchronous function to clean up old tasks from the database."""

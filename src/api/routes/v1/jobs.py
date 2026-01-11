@@ -63,8 +63,12 @@ async def submit_job(
     print(f"[ ] Using idempotency_key={idempotency_key} for job submission")
 
     # Check for existing tasks with the same idempotency key
+    existing_tasks = await task_repo.aget_tasks_by_idempotency_key(f"{idempotency_key}_")
+
     # Append suffix to differentiate multiple messages
-    if existing_tasks := await task_repo.aget_tasks_by_idempotency_key(f"{idempotency_key}_"):
+    if existing_tasks and all(
+        task.idempotency_key.startswith(f"{idempotency_key}_") for task in existing_tasks
+    ):
         logger.info(f"[x] Duplicate job submission detected with idempotency_key={idempotency_key}")
         return JobSubmissionResponseSchema(
             task_ids=[task.task_id for task in existing_tasks],

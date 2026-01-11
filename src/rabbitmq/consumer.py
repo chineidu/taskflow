@@ -129,9 +129,10 @@ class RabbitMQConsumer(BaseRabbitMQ):
                     # --------------- Initialize DB session and repository ---------------
                     try:
                         async with aget_db_session() as db:
-                            repo = TaskRepository(db)
+                            task_repo = TaskRepository(db)
                             # Check if idempotency key exists in the system
-                            if tasks := await repo.aget_tasks_by_idempotency_key(idempotency_key):
+                            tasks = await task_repo.aget_tasks_by_idempotency_key(idempotency_key)
+                            if tasks and all(task.status == TaskStatusEnum.COMPLETED for task in tasks):
                                 logger.info(
                                     f"[x] Duplicate message detected with idempotency_key={idempotency_key}. "
                                     f"Acknowledging and skipping processing for task_id={tasks[0].task_id}"
@@ -140,9 +141,22 @@ class RabbitMQConsumer(BaseRabbitMQ):
                                 await message.ack()
                                 continue
 
+                            # Check for existing task status. If already COMPLETED, ACK and skip processing
+                            # or if inprogress possibly due to worker crash, we can choose to reprocess
+                            task = await task_repo.aget_task_by_id(task_id)
+                            if task and task.status == TaskStatusEnum.COMPLETED:
+                                logger.info(
+                                    f"[x] Task {task_id} already COMPLETED. "
+                                    "Acknowledging and skipping processing."
+                                )
+                                await message.ack()
+                                continue
+
+                            if task and task.status == TaskStatusEnum.IN_PROGRESS:
+                                logger.info(f"[x] Task {task_id} was IN_PROGRESS. Resuming the task...")
+
                             # Immediate State Change
-                            await repo.aupdate_task_status(task_id, status=TaskStatusEnum.IN_PROGRESS)
-                            logger.info(f"[*] Task {task_id} is now IN_PROGRESS")
+                            await task_repo.aupdate_task_status(task_id, status=TaskStatusEnum.IN_PROGRESS)
 
                             # ==== Retrievable logging info ====
                             # All logs within this block will be captured and uploaded to S3
@@ -183,7 +197,7 @@ class RabbitMQConsumer(BaseRabbitMQ):
                                         # Update logs info in DB
                                         s3_key = s3_service.get_object_name(task_id)
                                         s3_url = s3_service.get_s3_object_url(task_id)
-                                        await repo.aupdate_log_info(
+                                        await task_repo.aupdate_log_info(
                                             task_id,
                                             has_logs=True,
                                             log_s3_key=s3_key,
@@ -191,15 +205,17 @@ class RabbitMQConsumer(BaseRabbitMQ):
                                         )
 
                                     else:
-                                        await repo.aupdate_log_info(
+                                        await task_repo.aupdate_log_info(
                                             task_id,
                                             has_logs=False,
                                         )
                                         logger.warning(f"[x] No logs to upload for task {task_id}")
 
                                     # Final State: SUCCESS
-                                    await repo.aupdate_task_status(task_id, status=TaskStatusEnum.COMPLETED)
-                                    await repo.aupdate_dlq_status(task_id, in_dlq=False)
+                                    await task_repo.aupdate_task_status(
+                                        task_id, status=TaskStatusEnum.COMPLETED
+                                    )
+                                    await task_repo.aupdate_dlq_status(task_id, in_dlq=False)
                                     # Acknowledge message and remove from queue
                                     await message.ack()
                                     logger.info(f"[+] Task {task_id} COMPLETED successfully")
@@ -224,7 +240,7 @@ class RabbitMQConsumer(BaseRabbitMQ):
                                         # Update logs info in DB
                                         s3_key = s3_service.get_object_name(task_id)
                                         s3_url = s3_service.get_s3_object_url(task_id)
-                                        await repo.aupdate_log_info(
+                                        await task_repo.aupdate_log_info(
                                             task_id,
                                             has_logs=True,
                                             log_s3_key=s3_key,
@@ -234,13 +250,13 @@ class RabbitMQConsumer(BaseRabbitMQ):
                                             f"[+] Task {task_id} uploaded logs to S3 after BUSINESS ERROR"
                                         )
                                     else:
-                                        await repo.aupdate_log_info(
+                                        await task_repo.aupdate_log_info(
                                             task_id,
                                             has_logs=False,
                                         )
 
                                     # Mark task as FAILED, do not retry
-                                    await repo.aupdate_task_status(
+                                    await task_repo.aupdate_task_status(
                                         task_id,
                                         status=TaskStatusEnum.FAILED,
                                         error=str(biz_logic_err),
@@ -280,7 +296,7 @@ class RabbitMQConsumer(BaseRabbitMQ):
                                         # Update logs info in DB
                                         s3_key = s3_service.get_object_name(task_id)
                                         s3_url = s3_service.get_s3_object_url(task_id)
-                                        await repo.aupdate_log_info(
+                                        await task_repo.aupdate_log_info(
                                             task_id,
                                             has_logs=True,
                                             log_s3_key=s3_key,
@@ -288,11 +304,11 @@ class RabbitMQConsumer(BaseRabbitMQ):
                                         )
                                         logger.info(f"[+] Task {task_id} uploaded logs to S3 after FAILURE")
                                     else:
-                                        await repo.aupdate_log_info(
+                                        await task_repo.aupdate_log_info(
                                             task_id,
                                             has_logs=False,
                                         )
-                                    await repo.aupdate_task_status(
+                                    await task_repo.aupdate_task_status(
                                         task_id,
                                         status=TaskStatusEnum.FAILED,
                                         error=str(callback_error),
