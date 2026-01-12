@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import (
 
 from src import create_logger
 from src.db.models import DBTask
-from src.schemas.db.models import TaskModelSchema
+from src.schemas.db.models import DashboardTaskStats, TaskModelSchema
 from src.schemas.types import TaskStatusEnum
 
 logger = create_logger("repo.task_repository")
@@ -67,6 +67,81 @@ class TaskRepository:
             logger.error(f"Error fetching tasks by status {status}: {e}")
             return []
 
+    async def aget_average_processing_time(self) -> float:
+        """Calculate the average processing time for completed tasks.
+
+        Parameters
+        ----------
+        limit : int
+            The maximum number of recent completed tasks to consider (default: 500).
+
+        Returns
+        -------
+        float
+            The average processing time in seconds. Returns 0.0 if no completed tasks are found.
+        """
+        try:
+            # Using `extract("epoch", ...)` extracts the epoch time difference between 
+            # completed_at and started_at.i.e. final result is in seconds
+            stmt = select(
+                func.round(func.avg(func.extract("epoch", DBTask.completed_at - DBTask.started_at)), 2).label(
+                    "avg_duration_seconds"
+                )
+            ).where(
+                DBTask.status == TaskStatusEnum.COMPLETED.value,
+                DBTask.completed_at.isnot(None),
+                DBTask.started_at.isnot(None),
+                DBTask.completed_at >= DBTask.started_at,
+            )
+            avg_time = await self.db.scalar(stmt)
+            return avg_time if avg_time else 0.0
+
+        except Exception as e:
+            logger.error(f"Error calculating average processing time: {e}")
+            return 0.0
+
+    async def aget_dashboard_metrics(self) -> DashboardTaskStats:
+        """Get tasks created within a specific time range. Uses database-level comparison.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        DashboardTaskStats
+            Dashboard metrics including status counts and DLQ counts.
+        """
+        # NB: Use `.execute()` for multi-column queries
+        try:
+            status_stmt = select(DBTask.status, func.count(DBTask.id)).group_by(DBTask.status)
+            status_result = await self.db.execute(status_stmt)
+            # Returns `status: count`. e.g. {'pending': 10, 'completed': 65, 'inprogress': 20, 'failed': 5}
+            status_mapping = dict(status_result.all())  # type: ignore
+
+            dlq_stmt = (
+                select(func.count(DBTask.id))
+                # i.e. where tasks are in the DLQ
+                .where(DBTask.in_dlq)
+                .order_by(func.count(DBTask.id).desc())
+            )
+            dlq_result = await self.db.scalar(dlq_stmt)
+
+            return DashboardTaskStats(
+                total_tasks=sum(status_mapping.values()),
+                pending=status_mapping.get(TaskStatusEnum.PENDING.value, 0),
+                in_progress=status_mapping.get(TaskStatusEnum.IN_PROGRESS.value, 0),
+                completed=status_mapping.get(TaskStatusEnum.COMPLETED.value, 0),
+                failed=status_mapping.get(TaskStatusEnum.FAILED.value, 0),
+                dlq_counts=dlq_result or 0,
+            )
+
+        except Exception as e:
+            logger.error(f"Error getting dashboard metrics: {e}")
+            return DashboardTaskStats(
+                total_tasks=0, pending=0, in_progress=0, completed=0, failed=0, dlq_counts=0
+            )
+
     async def aget_tasks_paginated(
         self,
         status: TaskStatusEnum | None = None,
@@ -116,7 +191,7 @@ class TaskRepository:
             logger.error(f"Error fetching paginated tasks: {e}")
             return ([], 0)
 
-    async def aget_tasks_by_created_time(self, created_after: str, created_before: str) -> list[DBTask]:
+    async def aget_tasks_by_creation_time(self, created_after: str, created_before: str) -> list[DBTask]:
         """Get tasks created within a specific time range. Uses database-level comparison.
 
         Parameters

@@ -3,7 +3,7 @@ from pydantic import ConfigDict, Field, field_validator
 from src import create_logger
 from src.schemas.base import BaseSchema
 from src.schemas.db.models import TaskModelSchema
-from src.schemas.rabbitmq.payload import RabbitMQPayload
+from src.schemas.rabbitmq.base import RabbitMQPayload
 from src.schemas.types import TaskStatusEnum
 
 logger = create_logger(name="schemas.jobs")

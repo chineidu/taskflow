@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models import DBTask
 from src.schemas.db.models import TaskModel
-from src.schemas.rabbitmq.payload import SubmittedJobResult
+from src.schemas.rabbitmq.base import SubmittedJobResult
 from src.schemas.types import TaskStatusEnum
 
 

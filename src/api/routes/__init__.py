@@ -1,3 +1,3 @@
-from .v1 import health, jobs, logs
+from .v1 import health, jobs, logs, metrics
 
-__all__ = ["health", "jobs", "logs"]
+__all__: list[str] = ["health", "jobs", "logs", "metrics"]

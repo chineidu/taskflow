@@ -5,6 +5,7 @@ from typing import Any, Awaitable, Callable, ParamSpec, TypeVar, overload
 from src import create_logger
 from src.config.config import app_config
 from src.rabbitmq.producer import RabbitMQProducer
+from src.schemas.rabbitmq.base import SystemHealthResult
 
 logger = create_logger("rabbitmq.utilities")
 
@@ -26,6 +27,8 @@ def queue_result_on_completion(
 ) -> SyncFunc:
     # Called without parameters. e.g. @queue_result_on_completion
     ...
+
+
 @overload
 def queue_result_on_completion(
     func: AsyncFunc,
@@ -36,6 +39,7 @@ def queue_result_on_completion(
 ) -> AsyncFunc:
     # Called without parameters. e.g. @queue_result_on_completion
     ...
+
 
 @overload
 def queue_result_on_completion(
@@ -216,3 +220,37 @@ def queue_result_on_completion(
 
     # Called without parameters
     return decorator(func)
+
+
+async def aget_system_health(producer: RabbitMQProducer | None = None) -> SystemHealthResult:
+    """Get RabbitMQ system health metrics.
+
+    Parameters
+    ----------
+    producer : RabbitMQProducer | None
+        Optional producer instance. If None, creates a temporary one.
+
+    Returns
+    -------
+    SystemHealthResult
+        Object containing queue metrics.
+    """
+    if producer is None:
+        producer = RabbitMQProducer(config=app_config)
+        async with producer.aconnection_context():
+            # Match the queue arguments used during consumer setup
+            queue_info = await producer.aensure_queue(
+                queue_name="task_queue",
+                arguments={"x-dead-letter-exchange": app_config.rabbitmq_config.dlq_config.dlx_name},
+                durable=True,
+            )
+    else:
+        queue_info = await producer.aensure_queue(
+            queue_name="task_queue",
+            arguments={"x-dead-letter-exchange": app_config.rabbitmq_config.dlq_config.dlx_name},
+            durable=True,
+        )
+    return SystemHealthResult(
+        messages_ready=(queue_info.declaration_result.message_count or 0) if queue_info else 0,
+        workers_online=(queue_info.declaration_result.consumer_count or 0) if queue_info else 0,
+    )

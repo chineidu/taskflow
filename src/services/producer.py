@@ -9,7 +9,7 @@ from src.db.models import aget_db_session
 from src.db.repositories.task_repository import TaskRepository
 from src.rabbitmq.base import BaseRabbitMQ
 from src.rabbitmq.producer import RabbitMQProducer
-from src.schemas.rabbitmq.payload import RabbitMQPayload, SubmittedJobResult
+from src.schemas.rabbitmq.base import RabbitMQPayload, SubmittedJobResult
 
 logger = create_logger(name="services.producer")
 

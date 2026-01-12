@@ -8,7 +8,7 @@ import aio_pika
 from src import create_logger
 from src.config import app_settings
 from src.rabbitmq.base import BaseRabbitMQ
-from src.schemas.rabbitmq.payload import RabbitMQPayload
+from src.schemas.rabbitmq.base import RabbitMQPayload
 
 if TYPE_CHECKING:
     from src.config.config import AppConfig

@@ -17,6 +17,7 @@ dependencies = [
     "python-json-logger>=4.0.0",
     "slowapi>=0.1.9",
     "sqlalchemy>=2.0.45",
+    "streamlit>=1.52.2",
 ]
 
 [dependency-groups]

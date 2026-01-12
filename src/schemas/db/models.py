@@ -1,3 +1,4 @@
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -48,3 +49,17 @@ class TaskModelSchema(BaseSchema):
         description="Timestamp when the task was last updated.",
     )
     error_message: str | None = Field(default=None, description="Error message if the task failed.")
+
+
+@dataclass(slots=True, kw_only=True)
+class DashboardTaskStats:
+    """Data class for task statistics in the dashboard."""
+
+    total_tasks: int = field(default=0, metadata={"description": "Total number of tasks."})
+    pending: int = field(default=0, metadata={"description": "Number of pending tasks."})
+    in_progress: int = field(default=0, metadata={"description": "Number of tasks in progress."})
+    completed: int = field(default=0, metadata={"description": "Number of completed tasks."})
+    failed: int = field(default=0, metadata={"description": "Number of failed tasks."})
+    dlq_counts: int = field(
+        default=0, metadata={"description": "Number of tasks in the Dead Letter Queue (DLQ)."}
+    )

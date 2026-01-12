@@ -7,7 +7,7 @@ import aio_pika
 import pytest
 
 from src.rabbitmq.producer import RabbitMQProducer
-from src.schemas.rabbitmq.payload import RabbitMQPayload
+from src.schemas.rabbitmq.base import RabbitMQPayload
 
 
 @pytest.fixture

@@ -18,7 +18,7 @@ from src.config import app_config
 from src.db.models import aget_db
 from src.db.repositories.task_repository import TaskRepository
 from src.schemas.db.models import TaskModelSchema
-from src.schemas.rabbitmq.payload import SubmittedJobResult
+from src.schemas.rabbitmq.base import SubmittedJobResult
 from src.schemas.routes.jobs import (
     InputSchema,
     JobSubmissionResponseSchema,
@@ -29,7 +29,7 @@ from src.services.producer import areplay_dlq_message_by_task_id, areplay_dlq_me
 
 if TYPE_CHECKING:
     from src.rabbitmq.producer import RabbitMQProducer
-    from src.schemas.rabbitmq.payload import RabbitMQPayload
+    from src.schemas.rabbitmq.base import RabbitMQPayload
 
 logger = create_logger(name="routes.jobs")
 LIMIT_VALUE: int = app_config.api_config.ratelimit.default_rate

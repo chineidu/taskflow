@@ -12,7 +12,7 @@ from slowapi.errors import RateLimitExceeded
 from src.api.core.exceptions import BaseAPIError, api_error_handler
 from src.api.core.lifespan import lifespan
 from src.api.core.middleware import MIDDLEWARE_STACK
-from src.api.routes import health, jobs, logs
+from src.api.routes import health, jobs, logs, metrics
 from src.config import app_config, app_settings
 
 warnings.filterwarnings("ignore")
@@ -55,12 +55,11 @@ def create_application() -> FastAPI:
         app.add_middleware(mdlware)
 
     # Include routers
-    # app.include_router(admin.router, prefix=prefix)
     # app.include_router(auth.router, prefix=auth_prefix)
     app.include_router(health.router, prefix=prefix)
     app.include_router(jobs.router, prefix=prefix)
     app.include_router(logs.router, prefix=prefix)
-    # app.include_router(task_status.router, prefix=prefix)
+    app.include_router(metrics.router, prefix=prefix)
 
     # Add exception handlers
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore
