@@ -56,10 +56,6 @@ class JobSubmissionResponseSchema(BaseSchema):
         if isinstance(v, str):
             return v
 
-        # Otherwise, log a warning and return a default value
-        logger.warning(
-            f"Invalid TaskStatusEnum value: {v!r}. Defaulting to {TaskStatusEnum.PENDING.value!r}."
-        )
         return TaskStatusEnum.PENDING.value
 
 

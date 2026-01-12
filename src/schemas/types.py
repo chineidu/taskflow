@@ -32,3 +32,9 @@ class TaskStatusEnum(StrEnum):
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+class PriorityEnum(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"

@@ -1,11 +1,12 @@
 import asyncio
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any, AsyncGenerator
+from typing import TYPE_CHECKING, AsyncGenerator
 
 import aio_pika
 
 from src import create_logger
 from src.config import app_settings
+from src.schemas.rabbitmq.base import QueueArguments
 
 if TYPE_CHECKING:
     from src.config.config import AppConfig
@@ -114,7 +115,7 @@ class BaseRabbitMQ:
     async def aensure_queue(
         self,
         queue_name: str,
-        arguments: dict[str, Any] | None = None,
+        arguments: QueueArguments,
         durable: bool = True,
     ) -> aio_pika.abc.AbstractQueue:
         """Ensure queue exists with specified settings. Idempotent operation.
@@ -123,7 +124,7 @@ class BaseRabbitMQ:
         ----------
         queue_name : str
             The name of the queue to ensure.
-        arguments : dict[str, Any], optional
+        arguments : QueueArguments
             Additional arguments for queue declaration (e.g. DLQ settings), by default None.
         durable : bool, optional
             Whether the queue should persist after broker restart, by default True.
@@ -141,12 +142,14 @@ class BaseRabbitMQ:
             raise RuntimeError("[-] Failed to establish channel connection")
 
         try:
-            queue = await self.channel.declare_queue(queue_name, arguments=arguments, durable=durable)
+            queue = await self.channel.declare_queue(
+                queue_name, arguments=arguments.model_dump(), durable=durable
+            )
             logger.debug(f"Queue '{queue_name}' ensured")
             return queue
 
         except aio_pika.exceptions.AMQPException as e:
-            logger.error(f"Failed to declare queue '{queue_name}': {e}")
+            logger.error(f"Failed to declare queue '{queue_name}' with arguments={arguments}: {e}")
             raise
 
     async def aensure_dlq(

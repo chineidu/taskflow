@@ -5,6 +5,7 @@ from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel, Field
 
 from src import ROOT
+from src.schemas.types import PriorityEnum
 
 
 @dataclass(slots=True, kw_only=True)
@@ -31,6 +32,9 @@ class RabbitMQConfig:
     heartbeat: int = field(default=60, metadata={"description": "Heartbeat interval in seconds"})
     prefetch_count: int = field(default=5, metadata={"description": "Number of messages to prefetch"})
     queue_names: QueueNames = field(metadata={"description": "Names of the RabbitMQ queues"})
+    queue_priority: PriorityEnum = field(
+        default=PriorityEnum.MEDIUM, metadata={"description": "Default priority level for the queues"}
+    )
     dlq_config: DLQConfig = field(metadata={"description": "Dead-letter queue configuration"})
     message_retries: int = field(default=3, metadata={"description": "Number of times to retry a message"})
     retry_backoff_delay: int = field(

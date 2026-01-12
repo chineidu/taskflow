@@ -31,8 +31,12 @@ Each section outlines a specific architectural choice, the rationale behind it, 
     - [Idempotent Manual Replays](#idempotent-manual-replays)
     - [Job/Task Timeout Handling](#jobtask-timeout-handling)
     - [Idempotent Job Submissions](#idempotent-job-submissions)
+    - [Exactly-once vs At-least-once Delivery](#exactly-once-vs-at-least-once-delivery)
+      - [At-least-once delivery](#at-least-once-delivery)
+      - [Exactly-once delivery](#exactly-once-delivery)
     - [Chaos Engineering](#chaos-engineering)
       - [Resuming Failed Tasks](#resuming-failed-tasks)
+    - [Priority Queue](#priority-queue)
 
 <!-- /TOC -->
 
@@ -194,6 +198,23 @@ Internally, `dataclasses` with `slots=True` are used to avoid the "validation ta
   - If existing tasks are found, the API returns their IDs and status instead of creating new tasks.
   - This logic is implemented in both the API route handling job submissions and the RabbitMQ consumer to ensure consistency across different submission methods.
 
+### Exactly-once vs At-least-once Delivery
+
+#### At-least-once delivery
+
+- The message is guaranteed to be delivered at least one time, but may be delivered multiple times.
+- If there's a failure before acknowledgment, the message broker will redeliver.
+- Simpler to implement but requires idempotent consumers.
+- Common in most messaging systems (RabbitMQ, Kafka, etc.).
+- This project implements `at-least-once delivery` with `idempotency`, which achieves effectively exactly-once processing.
+
+#### Exactly-once delivery
+
+- The message is guaranteed to be delivered and processed exactly one time, no duplicates.
+- Much harder to achieve in distributed systems.
+- Requires distributed transactions or sophisticated deduplication mechanisms.
+- True exactly-once is theoretically impossible in distributed systems.
+
 ### Chaos Engineering
 
 #### Resuming Failed Tasks
@@ -205,4 +226,18 @@ Internally, `dataclasses` with `slots=True` are used to avoid the "validation ta
 - **Implementation**:
   - Developed tests that simulate worker crashes mid-execution, verifying that tasks are requeued and successfully completed upon retry.
   - The consumer checks the status of tasks before processing to ensure idempotency and prevent duplicate executions.
+
+### Priority Queue
+
+- **Decision**: Implemented priority-based message handling in RabbitMQ.
+- **Rationale**:
+  - Certain tasks may require expedited processing due to their critical nature.
+  - Priority queues allow high-priority tasks to be processed before lower-priority ones, improving overall system responsiveness for urgent jobs.
+- **Implementation**:
+  - Configured RabbitMQ queues with `x-max-priority` to enable priority handling.
+  - Messages are published with a `priority` field, where higher numerical values indicate higher priority.
+  - The consumer processes messages based on their priority, ensuring that critical tasks are addressed promptly.
+- **Trade-offs**:
+  - Increased complexity in message publishing and queue management.
+  - Potential for starvation of low-priority tasks if high-priority tasks are continuously submitted.
   

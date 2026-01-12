@@ -9,6 +9,7 @@ from src import create_logger
 from src.config import app_settings
 from src.rabbitmq.base import BaseRabbitMQ
 from src.schemas.rabbitmq.base import RabbitMQPayload
+from src.schemas.types import PriorityEnum
 
 if TYPE_CHECKING:
     from src.config.config import AppConfig
@@ -43,6 +44,7 @@ class RabbitMQProducer(BaseRabbitMQ):
         self,
         message: RabbitMQPayload | dict[str, Any],
         queue_name: str,
+        priority: PriorityEnum | str,
         routing_key: str | None = None,
         request_id: str | None = None,
         durable: bool = True,
@@ -57,6 +59,8 @@ class RabbitMQProducer(BaseRabbitMQ):
             The message payload to be sent.
         queue_name : str
             The name of the target RabbitMQ queue.
+        priority : PriorityEnum | str
+            The priority level of the message.
         routing_key : str, optional
             The routing key for the message, by default None.
         request_id : str, optional
@@ -73,6 +77,9 @@ class RabbitMQProducer(BaseRabbitMQ):
         tuple[bool, str]
             Tuple indicating success status and task ID.
         """
+        # To prevent circular imports
+        from src.rabbitmq.utilities import map_priority_enum_to_int
+
         if self.channel is None:
             logger.debug("Channel not established, connecting...")
             await self.aconnect()
@@ -106,6 +113,7 @@ class RabbitMQProducer(BaseRabbitMQ):
                 body=body,
                 content_type="application/json",
                 delivery_mode=delivery_mode,
+                priority=map_priority_enum_to_int(priority),
                 correlation_id=request_id,
                 timestamp=timestamp,
                 headers={"task_id": task_id, **headers},
@@ -131,6 +139,7 @@ class RabbitMQProducer(BaseRabbitMQ):
         self,
         messages: list[RabbitMQPayload],
         queue_name: str,
+        priority: PriorityEnum | str,
         routing_key: str | None = None,
         request_id: str | None = None,
         durable: bool = True,
@@ -144,6 +153,8 @@ class RabbitMQProducer(BaseRabbitMQ):
             List of message payloads to be sent.
         queue_name : str
             The name of the target RabbitMQ queue.
+        priority : PriorityEnum | str
+            The priority level of the message.
         routing_key : str | None, optional
             The routing key for the message, by default None
         request_id : str | None, optional
@@ -167,6 +178,7 @@ class RabbitMQProducer(BaseRabbitMQ):
                 (success, task_id) = await self.apublish(
                     message=msg,
                     queue_name=queue_name,
+                    priority=priority,
                     routing_key=routing_key,
                     request_id=request_id,
                     durable=durable,

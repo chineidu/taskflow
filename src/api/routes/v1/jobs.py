@@ -60,7 +60,6 @@ async def submit_job(
     idempotency_key: str = (
         idem_key if idem_key else generate_idempotency_key(payload=data.model_dump(), user_id=None)
     )
-    print(f"[ ] Using idempotency_key={idempotency_key} for job submission")
 
     # Check for existing tasks with the same idempotency key
     existing_tasks = await task_repo.aget_tasks_by_idempotency_key(f"{idempotency_key}_")
@@ -80,7 +79,11 @@ async def submit_job(
     headers: dict[str, str] = {"Idempotency-Key": idempotency_key}
 
     response: SubmittedJobResult = await atrigger_job(
-        messages=messages, queue_name=queue_name, request_id=request_id, producer=producer, headers=headers
+        messages=messages,
+        queue_name=queue_name,
+        request_id=request_id,
+        producer=producer,
+        headers=headers,
     )
     if not response:
         raise HTTPError(

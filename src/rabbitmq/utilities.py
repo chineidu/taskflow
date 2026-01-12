@@ -5,7 +5,8 @@ from typing import Any, Awaitable, Callable, ParamSpec, TypeVar, overload
 from src import create_logger
 from src.config.config import app_config
 from src.rabbitmq.producer import RabbitMQProducer
-from src.schemas.rabbitmq.base import SystemHealthResult
+from src.schemas.rabbitmq.base import QueueArguments, SystemHealthResult
+from src.schemas.types import PriorityEnum
 
 logger = create_logger("rabbitmq.utilities")
 
@@ -71,6 +72,7 @@ def queue_result_on_completion(
     queue_name: str | None = None,
     dlq_name: str | None = None,
     task_id_key: str | None = None,
+    priority: PriorityEnum | str = PriorityEnum.MEDIUM,
 ) -> Callable[..., Any]:
     """Decorator to automatically publish function results to a RabbitMQ queue.
 
@@ -83,6 +85,8 @@ def queue_result_on_completion(
         '{queue_name}_dlq'.
     task_id_key : str | None, optional
         The key in the result dict to use as the task ID. If not provided, defaults to None.
+    priority : PriorityEnum
+        The priority level of the message.
 
     Returns
     -------
@@ -110,6 +114,7 @@ def queue_result_on_completion(
 
     queue_name = queue_name if queue_name else "default_queue"
     dlq_name = dlq_name if dlq_name else f"{queue_name}_dlq"
+    queue_args = QueueArguments(x_dead_letter_exchange=None, x_max_priority=None)
 
     def decorator(f: Callable[P, Any]) -> Callable[P, Any]:
         if asyncio.iscoroutinefunction(f):
@@ -126,11 +131,14 @@ def queue_result_on_completion(
 
                     # Publish the result to the specified queue
                     async with producer.aconnection_context():
-                        await producer.aensure_queue(queue_name=queue_name, durable=True)
+                        await producer.aensure_queue(
+                            queue_name=queue_name, arguments=queue_args, durable=True
+                        )
 
                         success, task_id = await producer.apublish(
                             message=payload,
                             queue_name=queue_name,
+                            priority=priority,
                             task_id=task_id_key,
                             durable=True,
                         )
@@ -142,7 +150,7 @@ def queue_result_on_completion(
 
                     # Publish error to DLQ
                     async with producer.aconnection_context():
-                        await producer.aensure_queue(queue_name=dlq_name, durable=True)
+                        await producer.aensure_queue(queue_name=dlq_name, arguments=queue_args, durable=True)
 
                         error_payload = {
                             "error": str(e),
@@ -153,6 +161,7 @@ def queue_result_on_completion(
                         await producer.apublish(
                             message=error_payload,
                             queue_name=dlq_name,
+                            priority=priority,
                             task_id="error_unknown",
                         )
                         logger.error(f"[x] Published error to DLQ '{dlq_name}'")
@@ -174,11 +183,14 @@ def queue_result_on_completion(
                 # Publish the result to the specified queue
                 async def _publish_success() -> None:
                     async with producer.aconnection_context():
-                        await producer.aensure_queue(queue_name=queue_name, durable=True)
+                        await producer.aensure_queue(
+                            queue_name=queue_name, arguments=queue_args, durable=True
+                        )
 
                         success, task_id = await producer.apublish(
                             message=payload,
                             queue_name=queue_name,
+                            priority=priority,
                             task_id=task_id_key,
                             durable=True,
                         )
@@ -194,7 +206,7 @@ def queue_result_on_completion(
                 # Publish error to DLQ
                 async def _publish_error(e: Exception) -> None:
                     async with producer.aconnection_context():
-                        await producer.aensure_queue(queue_name=dlq_name, durable=True)
+                        await producer.aensure_queue(queue_name=dlq_name, arguments=queue_args, durable=True)
 
                         error_payload = {
                             "error": str(e),
@@ -204,6 +216,7 @@ def queue_result_on_completion(
 
                         await producer.apublish(
                             message=error_payload,
+                            priority=priority,
                             queue_name=dlq_name,
                             task_id="error_unknown",
                         )
@@ -235,22 +248,57 @@ async def aget_system_health(producer: RabbitMQProducer | None = None) -> System
     SystemHealthResult
         Object containing queue metrics.
     """
+    queue_args = QueueArguments(
+        x_dead_letter_exchange=app_config.rabbitmq_config.dlq_config.dlx_name, x_max_priority=10
+    )
     if producer is None:
         producer = RabbitMQProducer(config=app_config)
         async with producer.aconnection_context():
             # Match the queue arguments used during consumer setup
             queue_info = await producer.aensure_queue(
                 queue_name="task_queue",
-                arguments={"x-dead-letter-exchange": app_config.rabbitmq_config.dlq_config.dlx_name},
+                arguments=queue_args,
                 durable=True,
             )
     else:
         queue_info = await producer.aensure_queue(
             queue_name="task_queue",
-            arguments={"x-dead-letter-exchange": app_config.rabbitmq_config.dlq_config.dlx_name},
+            arguments=queue_args,
             durable=True,
         )
     return SystemHealthResult(
         messages_ready=(queue_info.declaration_result.message_count or 0) if queue_info else 0,
         workers_online=(queue_info.declaration_result.consumer_count or 0) if queue_info else 0,
     )
+
+
+def map_priority_enum_to_int(priority: PriorityEnum | str) -> int:
+    """Convert PriorityEnum to its string representation.
+
+    Parameters
+    ----------
+    priority : PriorityEnum | str
+        The priority level as an enum or string.
+
+    Returns
+    -------
+    str
+        The string representation of the priority level.
+    """
+    valid_priorities = ", ".join({e.value for e in PriorityEnum})
+    try:
+        if isinstance(priority, str):
+            priority = PriorityEnum(priority.lower())
+        else:
+            priority = priority
+
+    except ValueError:
+        raise ValueError(f"priority must be one of ({valid_priorities}), got '{priority}'") from None
+
+    mapping: dict[PriorityEnum, int] = {
+        PriorityEnum.LOW: 1,
+        PriorityEnum.MEDIUM: 6,
+        PriorityEnum.HIGH: 10,
+    }
+    # Default to MEDIUM if not found
+    return mapping.get(priority, 6)

@@ -9,7 +9,9 @@ from src.db.models import aget_db_session
 from src.db.repositories.task_repository import TaskRepository
 from src.rabbitmq.base import BaseRabbitMQ
 from src.rabbitmq.producer import RabbitMQProducer
-from src.schemas.rabbitmq.base import RabbitMQPayload, SubmittedJobResult
+from src.rabbitmq.utilities import map_priority_enum_to_int
+from src.schemas.rabbitmq.base import QueueArguments, RabbitMQPayload, SubmittedJobResult
+from src.schemas.types import PriorityEnum
 
 logger = create_logger(name="services.producer")
 
@@ -44,36 +46,40 @@ async def atrigger_job(
     SubmittedJobResult
         An instance containing the task ID and number of messages published.
     """
+    priority = app_config.rabbitmq_config.queue_priority
+    priority_int: int = map_priority_enum_to_int(priority)
+    queue_args = QueueArguments(
+        x_dead_letter_exchange=app_config.rabbitmq_config.dlq_config.dlx_name, x_max_priority=priority_int
+    )
     if not producer:
         producer = RabbitMQProducer(config=app_config)
 
         async with producer.aconnection_context():
             await producer.aensure_queue(
                 queue_name=queue_name,
-                arguments={
-                    "x-dead-letter-exchange": app_config.rabbitmq_config.dlq_config.dlx_name,
-                },
+                arguments=queue_args,
                 durable=True,
             )
             num_msgs, task_ids = await producer.abatch_publish(
                 messages=messages,
                 queue_name=queue_name,
+                priority=priority,
                 request_id=request_id,
                 routing_key=routing_key,
                 headers=headers,
             )
     else:
         # Use existing producer connection
+        await producer.aconnect()  # Ensure connection is established (idempotent)
         await producer.aensure_queue(
             queue_name=queue_name,
-            arguments={
-                "x-dead-letter-exchange": app_config.rabbitmq_config.dlq_config.dlx_name,
-            },
+            arguments=queue_args,
             durable=True,
         )
         num_msgs, task_ids = await producer.abatch_publish(
             messages=messages,
             queue_name=queue_name,
+            priority=priority,
             request_id=request_id,
             routing_key=routing_key,
             headers=headers,
@@ -103,6 +109,9 @@ async def areplay_dlq_messages(
     """
     client = BaseRabbitMQ(config=app_config)
     producer = RabbitMQProducer(config=app_config)
+    queue_args = QueueArguments(
+        x_dead_letter_exchange=app_config.rabbitmq_config.dlq_config.dlx_name, x_max_priority=5
+    )
 
     success_count = 0
     failed_count = 0
@@ -112,10 +121,10 @@ async def areplay_dlq_messages(
         # Use the same channel for all operations
         producer.channel = client.channel
 
-        dlq_queue = await client.aensure_queue(queue_name=dlq_name, durable=True)
+        dlq_queue = await client.aensure_queue(queue_name=dlq_name, arguments=queue_args, durable=True)
         await client.aensure_queue(
             queue_name=target_queue_name,
-            arguments={"x-dead-letter-exchange": app_config.rabbitmq_config.dlq_config.dlx_name},
+            arguments=queue_args,
             durable=True,
         )
 
@@ -138,6 +147,7 @@ async def areplay_dlq_messages(
                     message=json.loads(message.body.decode()),
                     queue_name=target_queue_name,
                     routing_key=None,
+                    priority=PriorityEnum.MEDIUM,
                     headers=headers,
                     task_id=str(message.headers.get("task_id")),
                 )
@@ -193,12 +203,15 @@ async def areplay_dlq_message_by_task_id(
     # Proceed to search DLQ in RabbitMQ
     client = BaseRabbitMQ(config=app_config)
     producer = RabbitMQProducer(config=app_config)
+    queue_args = QueueArguments(
+        x_dead_letter_exchange=app_config.rabbitmq_config.dlq_config.dlx_name, x_max_priority=5
+    )
 
     # ----- Temporary queue for searching -----
     # Instead of storing messages in memory (Python list), we use a temporary RabbitMQ queue
     # to hold messages that are not the target. This avoids high memory usage for large DLQs.
     # This also prevents requeueing a message that was just moved from the DLQ back to itself.
-    # i.e. if the message is not the target, and we publish it back to the DLQ, it may be picked 
+    # i.e. if the message is not the target, and we publish it back to the DLQ, it may be picked
     # up again in the same search loop, causing an infinite loop.
     temp_queue_name = f"temp_search_queue_{task_id}_{int(time.time())}"
     found: bool = False
@@ -208,14 +221,16 @@ async def areplay_dlq_message_by_task_id(
         producer.channel = client.channel
 
         # Ensure both queues exist
-        dlq_queue = await client.aensure_queue(queue_name=dlq_name, durable=True)
+        dlq_queue = await client.aensure_queue(queue_name=dlq_name, arguments=queue_args, durable=True)
         # Create temporary queue with auto-delete after 60 seconds of inactivity
         temp_queue = await client.aensure_queue(
-            queue_name=temp_queue_name, durable=False, arguments={"x-expires": 60000}
+            queue_name=temp_queue_name,
+            durable=False,
+            arguments=QueueArguments(x_dead_letter_exchange=None, x_max_priority=None, x_expires=60000),
         )
         await client.aensure_queue(
             queue_name=target_queue_name,
-            arguments={"x-dead-letter-exchange": app_config.rabbitmq_config.dlq_config.dlx_name},
+            arguments=queue_args,
             durable=True,
         )
 
@@ -240,6 +255,7 @@ async def areplay_dlq_message_by_task_id(
                     success, _ = await producer.apublish(
                         message=json.loads(message.body.decode()),
                         queue_name=target_queue_name,
+                        priority=PriorityEnum.MEDIUM,
                         routing_key=None,
                         headers=headers,
                         task_id=message_task_id,
@@ -256,6 +272,7 @@ async def areplay_dlq_message_by_task_id(
                 await producer.apublish(
                     message=json.loads(message.body.decode()),
                     queue_name=temp_queue.name,
+                    priority=PriorityEnum.MEDIUM,
                     routing_key=None,
                     durable=False,
                     headers=message.headers,
@@ -275,6 +292,7 @@ async def areplay_dlq_message_by_task_id(
             await producer.apublish(
                 message=json.loads(temp_message.body.decode()),
                 queue_name=dlq_name,
+                priority=PriorityEnum.MEDIUM,
                 routing_key=None,
                 headers=temp_message.headers,
                 task_id=str(temp_message.headers.get("task_id")) if temp_message.headers else None,

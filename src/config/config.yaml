@@ -8,6 +8,7 @@ config:
     queue_names:
       task_queue: task_queue
       result_queue: result_queue
+    queue_priority: high
     dlq_config:
       dlq_name: task_queue_dlq
       dlx_name: task_queue_dlx

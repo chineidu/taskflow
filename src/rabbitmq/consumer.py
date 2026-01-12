@@ -17,8 +17,9 @@ from src.db.models import aget_db_session
 from src.db.repositories.task_repository import TaskRepository
 from src.rabbitmq.base import BaseRabbitMQ
 from src.rabbitmq.producer import RabbitMQProducer
-from src.rabbitmq.utilities import queue_result_on_completion
-from src.schemas.types import TaskStatusEnum
+from src.rabbitmq.utilities import map_priority_enum_to_int, queue_result_on_completion
+from src.schemas.rabbitmq.base import QueueArguments
+from src.schemas.types import PriorityEnum, TaskStatusEnum
 from src.services.storage import S3StorageService
 
 if TYPE_CHECKING:
@@ -75,6 +76,8 @@ class RabbitMQConsumer(BaseRabbitMQ):
         producer = RabbitMQProducer(self.config)  # Used for re-publishing retries
         await producer.aconnect()  # Ensure producer is connected before use
         s3_service = S3StorageService()
+        priority = app_config.rabbitmq_config.queue_priority
+        priority_int = map_priority_enum_to_int(priority)
 
         assert self.channel is not None, "Channel is not established."
 
@@ -86,7 +89,10 @@ class RabbitMQConsumer(BaseRabbitMQ):
         queue = await self.aensure_queue(
             queue_name=queue_name,
             # Attach dead-letter exchange for failed messages
-            arguments={"x-dead-letter-exchange": self.config.rabbitmq_config.dlq_config.dlx_name},
+            arguments=QueueArguments(
+                x_dead_letter_exchange=self.config.rabbitmq_config.dlq_config.dlx_name,
+                x_max_priority=priority_int,
+            ),
             durable=durable,
         )
         # Wait queue with N ttl for retries
@@ -356,6 +362,7 @@ class RabbitMQConsumer(BaseRabbitMQ):
                         await producer.apublish(
                             message=json.loads(message.body.decode()),
                             queue_name=delay_queue_name,
+                            priority=PriorityEnum.MEDIUM,
                             headers=retry_headers,
                             request_id=correlation_id,
                             task_id=task_id,
