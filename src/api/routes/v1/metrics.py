@@ -1,6 +1,5 @@
 """API routes for job submission and retrieval."""
 
-import asyncio
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, Request, status
@@ -36,10 +35,9 @@ async def fetch_dashboard_metrics(
 
     avg_processing_time = await task_repo.aget_average_processing_time()
     metrics = await task_repo.aget_dashboard_metrics()
-    
+
     # RabbitMQ health check can run independently
     system_health = await aget_system_health(producer=producer)
-    
 
     return MetricsResponseSchema(
         avg_processing_time_seconds=avg_processing_time,

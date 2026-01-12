@@ -167,7 +167,7 @@ class BaseConfig(BaseSettings):
 
 
 def setup_env() -> None:
-    """Sets environment variables for Together AI and OpenRouter clients."""
+    """Sets environment variables."""
     pass
 
 class DevelopmentConfig(BaseConfig):

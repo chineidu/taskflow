@@ -192,6 +192,26 @@ services:
       tasks_cleanup:
         condition: service_started
     restart: unless-stopped
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m streamlit run src/frontend/app.py
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    environment:
+      # Override database host for Docker networking
+      HOST: api
+      PORT: 8000
+    volumes:
+      # Mount source code as read-only for live updates without rebuilding
+      - ./src:/app/src:ro
+    depends_on:
+      api:
+        condition: service_started
+    restart: unless-stopped
 
 # Named volumes ONLY!
 # Persist data outside the lifecycle of the container.

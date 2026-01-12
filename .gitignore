@@ -217,3 +217,5 @@ logs/
 **/**/*.ipynb
 **/**/.vscode/
 **/**/note.*
+**/**/.env.sandbox
+**/**/.env.staging
