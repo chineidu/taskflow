@@ -2576,6 +2576,7 @@ dependencies = [
     { name = "msgspec" },
     { name = "omegaconf" },
     { name = "pydantic-settings" },
+    { name = "python-json-logger" },
     { name = "slowapi" },
     { name = "sqlalchemy" },
 ]
@@ -2602,6 +2603,7 @@ requires-dist = [
     { name = "msgspec", specifier = ">=0.20.0" },
     { name = "omegaconf", specifier = ">=2.3.0" },
     { name = "pydantic-settings", specifier = ">=2.12.0" },
+    { name = "python-json-logger", specifier = ">=4.0.0" },
     { name = "slowapi", specifier = ">=0.1.9" },
     { name = "sqlalchemy", specifier = ">=2.0.45" },
 ]

@@ -24,7 +24,7 @@ from src.services.storage import S3StorageService
 if TYPE_CHECKING:
     from src.config.config import AppConfig
 
-logger = create_logger("rabbitmq.consumer")
+logger = create_logger("rabbitmq.consumer", structured=True)
 RABBITMQ_URL: str = app_settings.rabbitmq_url
 MAX_RETRIES: int = app_config.rabbitmq_config.max_retries
 DELAY_BETWEEN_RETRIES: int = app_config.rabbitmq_config.retry_backoff_delay
@@ -164,7 +164,7 @@ class RabbitMQConsumer(BaseRabbitMQ):
                             with tempfile.NamedTemporaryFile(
                                 mode="w+", suffix=".log", delete=True
                             ) as tmp_file:
-                                task_handler = add_file_handler(logger, tmp_file.name)
+                                task_handler = add_file_handler(logger, tmp_file.name, structured=True)
                                 temp_path = Path(tmp_file.name)
 
                                 # ----------- Call the provided callback function -----------
