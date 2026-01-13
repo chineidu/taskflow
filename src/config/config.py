@@ -22,6 +22,18 @@ class DLQConfig:
 
 
 @dataclass(slots=True, kw_only=True)
+class CircuitBreakerConfig:
+    failure_threshold: int = field(
+        default=5,
+        metadata={"description": "Number of consecutive failures to trip the circuit breaker"},
+    )
+    recovery_timeout: int = field(
+        default=60,
+        metadata={"description": "Time in seconds before attempting to reset the circuit breaker"},
+    )
+
+
+@dataclass(slots=True, kw_only=True)
 class RabbitMQConfig:
     max_retries: int = field(default=3, metadata={"description": "Maximum number of connection retries"})
     retry_delay: int = field(
@@ -42,6 +54,9 @@ class RabbitMQConfig:
     )
     tasks_timeout: int = field(
         default=300, metadata={"description": "Default timeout for task processing in seconds"}
+    )
+    circuit_breaker_config: CircuitBreakerConfig = field(
+        metadata={"description": "Circuit breaker configuration"}
     )
 
 

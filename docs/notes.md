@@ -37,6 +37,11 @@ Each section outlines a specific architectural choice, the rationale behind it, 
     - [Chaos Engineering](#chaos-engineering)
       - [Resuming Failed Tasks](#resuming-failed-tasks)
     - [Priority Queue](#priority-queue)
+  - [Circuit Breaker Pattern](#circuit-breaker-pattern)
+    - [Core Concept Mental Model](#core-concept-mental-model)
+      - [States](#states)
+    - [State Transitions](#state-transitions)
+    - [When Should Circuit Breakers Be Used?](#when-should-circuit-breakers-be-used)
 
 <!-- /TOC -->
 
@@ -240,4 +245,55 @@ Internally, `dataclasses` with `slots=True` are used to avoid the "validation ta
 - **Trade-offs**:
   - Increased complexity in message publishing and queue management.
   - Potential for starvation of low-priority tasks if high-priority tasks are continuously submitted.
+
+## Circuit Breaker Pattern
+
+- The Circuit Breaker pattern is a resilience pattern used to prevent cascading failures when your service depends on an unreliable external system (API, DB, message broker, ML model service, etc.).
+
+- Without a circuit breaker:
+  - Requests keep going to the failing service
+  - Threads/event loop get blocked
+  - Latency spikes
+  - Eventually your whole service goes down
   
+- With the circuit breaker, the system fails fast and recovers gracefully.
+
+### Core Concept (Mental Model)
+
+It's similar to a real electrical circuit breaker.
+
+#### States
+
+- **CLOSED (Normal)**
+  - Requests flow through
+  - Failures are counted
+
+- **OPEN (Tripped)**
+  - Requests are immediately rejected
+  - No calls made to the failing service
+
+- **HALF-OPEN (Recovery test)**
+  - A few trial requests are allowed
+  - If they succeed -> go back to CLOSED
+  - If they fail -> back to OPEN
+
+### State Transitions
+
+```txt
+CLOSED         -> (failures exceed threshold)      -> OPEN
+OPEN           -> (timeout expires)                -> HALF-OPEN
+HALF-OPEN      -> (success)                        -> CLOSED
+HALF-OPEN      -> (failure)                        -> OPEN
+
+```
+
+### When Should Circuit Breakers Be Used?
+
+- Use a circuit breaker when calling an external service that can lead to cascading failures in your system or infrastructure errors.
+  - Examples:
+    - External HTTP APIs
+    - Database connections
+    - Message brokers
+    - ML model serving endpoints, etc.
+
+- Don't use a circuit breaker for business logic errors (e.g., invalid input data) that should be handled gracefully without tripping the circuit.

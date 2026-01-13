@@ -12,10 +12,15 @@ config:
     dlq_config:
       dlq_name: task_queue_dlq
       dlx_name: task_queue_dlx
-      ttl: 30000  # 30 seconds
+      ttl: 30000 # 30 seconds
     message_retries: 3
     retry_backoff_delay: 2
-    tasks_timeout: 300  # 5 minutes
+    tasks_timeout: 300 # 5 minutes
+    circuit_breaker_config:
+      # failure_threshold > message_retries to ensure circuit breaker activates
+      # after more retry attempts than individual messages allow
+      failure_threshold: 5
+      recovery_timeout: 60
 
   api_config:
     title: TaskFlow API
