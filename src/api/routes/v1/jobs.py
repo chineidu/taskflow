@@ -260,5 +260,5 @@ async def get_task_status_fragment(
 
 @router.get("/jobs/view/demo", response_class=HTMLResponse, status_code=status.HTTP_200_OK)
 async def render_demo_page(request: Request) -> HTMLResponse:
-    """Serves the main HTMX demo page."""
-    return templates.TemplateResponse("demo.html", {"request": request})
+    """Serves the main HTMX jobs page."""
+    return templates.TemplateResponse("jobs.html", {"request": request})
