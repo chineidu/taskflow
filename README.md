@@ -68,7 +68,7 @@ The system consists of several key components:
 1. **Clone the repository:**
 
     ```bash
-    git clone https://github.com/yourusername/taskflow.git
+    git clone https://github.com/chineidu/taskflow.git
     cd taskflow
     ```
 
