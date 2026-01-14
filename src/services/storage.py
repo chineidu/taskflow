@@ -12,6 +12,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from src import create_logger
 from src.config import app_settings
 from src.schemas.routes.logs import S3UploadMetadata, UploadResultExtraArgs
+from src.schemas.services.storage import LogStorageUploadResult
 
 logger = create_logger("storage")
 MAX_ATTEMPTS: int = 3
@@ -292,4 +293,104 @@ class S3StorageService:
             filepath,
             self.bucket_name,
             object_name,
+        )
+
+
+class S3StorageLogUploadPolicy:
+    """Policy class for handling S3 log uploads."""
+
+    def __init__(
+        self,
+        storage_service: S3StorageService,
+        max_attempts: int = 3,
+        base_delay: float = 1.0,
+        raise_on_failure: bool = False,
+    ) -> None:
+        """Initialize the S3LogUploadPolicy.
+
+        Parameters
+        ----------
+        storage_service : S3StorageService
+            The S3 storage service instance.
+        max_attempts : int, optional
+            Maximum number of upload attempts, by default 3
+        base_delay : float, optional
+            Base delay in seconds for exponential backoff, by default 1.0
+        raise_on_failure : bool, optional
+            Whether to raise an exception on final failure, by default False
+        """
+        self.storage_service = storage_service
+        self.max_attempts = max_attempts
+        self.base_delay = base_delay
+        self.raise_on_failure = raise_on_failure
+
+    async def aupload_with_retry(
+        self,
+        filepath: str | Path,
+        task_id: str,
+        correlation_id: str,
+        environment: str,
+        max_allowed_size_bytes: int = app_settings.LOG_MAX_SIZE_BYTES,
+    ) -> LogStorageUploadResult:
+        """Upload a file to S3 with retry logic.
+
+        Parameters
+        ----------
+        filepath : str | Path
+            Path to the file to upload.
+        task_id : str
+            Unique task identifier.
+        correlation_id : str
+            Correlation ID for tracing.
+        environment : str
+            Application environment (e.g., development, production).
+        max_allowed_size_bytes : int, optional
+            Maximum allowed file size in bytes, by default app_settings.LOG_MAX_SIZE_BYTES
+
+        Returns
+        -------
+        LogStorageUploadResult
+            _description_
+        """
+        last_exception: Exception | None = None
+
+        for attempt in range(1, self.max_attempts + 1):
+            try:
+                success = await self.storage_service.aupload_file_to_s3(
+                    filepath=filepath,
+                    task_id=task_id,
+                    correlation_id=correlation_id,
+                    environment=environment,
+                    max_allowed_size_bytes=max_allowed_size_bytes,
+                )
+                if success:
+                    return LogStorageUploadResult(
+                        attempts=attempt,
+                        s3_key=self.storage_service.get_object_name(task_id),
+                        s3_url=self.storage_service.get_s3_object_url(task_id),
+                    )
+            except Exception as e:
+                last_exception = e
+
+            if attempt < self.max_attempts:
+                delay: float = self.base_delay * attempt
+                logger.warning(
+                    f"[-] Upload attempt {attempt} for task_id={task_id} failed: {last_exception}. "
+                    f"Retrying in {delay} seconds..."
+                )
+                await asyncio.sleep(delay)
+
+        # All attempts failed
+        error_message = (
+            f"All {self.max_attempts} upload attempts failed for task_id={task_id}. "
+            f"Last error: {last_exception}"
+        )
+        logger.error(error_message)
+
+        if self.raise_on_failure and last_exception is not None:
+            raise last_exception
+
+        return LogStorageUploadResult(
+            attempts=self.max_attempts,
+            error=error_message,
         )

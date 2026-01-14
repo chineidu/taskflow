@@ -297,3 +297,8 @@ HALF-OPEN      -> (failure)                        -> OPEN
     - ML model serving endpoints, etc.
 
 - Don't use a circuit breaker for business logic errors (e.g., invalid input data) that should be handled gracefully without tripping the circuit.
+
+- **Implementation**:
+  - Integrated a circuit breaker mechanism in the consumer service when using infrastructure resources. i.e. not business logic
+  - Even though storage service is part of infrastructure resources, it's not a critical component (used for storing logs and observability) and it's not integrated with the circuit breaker.
+  - Configured thresholds for failure rates and timeouts to trip the circuit breaker appropriately.

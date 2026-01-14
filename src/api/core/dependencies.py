@@ -44,7 +44,7 @@ def idempotency_key_header(
         default=None,
         alias="Idempotency-Key",
         description="Optional idempotency key to prevent duplicate processing of requests.",
-        example=None,
+        example="my-idempotency-key",
     ),
 ) -> str | None:
     """Dependency to extract the Idempotency-Key header from requests."""

@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING, Annotated, Any
 from aiocache.factory import Cache
 from fastapi import APIRouter, Depends, Path, Request, status
 from fastapi.params import Query
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio.session import AsyncSession
 
 from src import create_logger
@@ -34,7 +36,7 @@ if TYPE_CHECKING:
 logger = create_logger(name="routes.jobs")
 LIMIT_VALUE: int = app_config.api_config.ratelimit.default_rate
 router = APIRouter(tags=["jobs"], default_response_class=MsgSpecJSONResponse)
-
+templates = Jinja2Templates(directory="src/api/templates")
 
 # Order of routes matters here due to FastAPI's routing mechanism
 # Routes with path parameters should be defined BEFORE more general routes
@@ -50,7 +52,7 @@ async def submit_job(
     idem_key: str | None = Depends(idempotency_key_header),
     db: AsyncSession = Depends(aget_db),
     producer: "RabbitMQProducer| None" = Depends(get_producer),
-) -> JobSubmissionResponseSchema:
+) -> Any:
     """Route for submitting job for processing."""
     request_id: str = request.headers.get("X-Request-ID", "")
     task_repo = TaskRepository(db=db)
@@ -109,6 +111,10 @@ async def submit_job(
             details="No tasks to store in the database",
         )
     await task_repo.acreate_tasks(tasks=tasks)
+
+    if request.headers.get("HX-Request"):
+        # If the request comes from HTMX, return the fragment immediately
+        return templates.TemplateResponse("task_row.html", {"request": request, "task": tasks})
 
     return JobSubmissionResponseSchema(
         task_ids=response.task_ids,
@@ -227,3 +233,32 @@ async def get_job(
         raise ResourcesNotFoundError(f"task '{task_id}'")
 
     return task
+
+
+@router.get("/jobs/{task_id}/status-fragment", status_code=status.HTTP_200_OK)
+async def get_task_status_fragment(
+    request: Request,  # Required by SlowAPI  # noqa: ARG001
+    task_id: Annotated[str, Path(description="The ID of the task to retrieve status fragment for.")],
+    db: AsyncSession = Depends(aget_db),
+) -> HTMLResponse:
+    """Route for fetching a lightweight status fragment of a task."""
+    task_repo = TaskRepository(db=db)
+    _task = await task_repo.aget_task_by_id(task_id)
+
+    if not _task:
+        logger.warning(f"[x] Task not found: task_id={task_id}")
+        raise ResourcesNotFoundError(f"task '{task_id}'")
+
+    return templates.TemplateResponse(
+        "task_row.html",
+        {
+            "request": request,
+            "task": _task,
+        },
+    )
+
+
+@router.get("/jobs/view/demo", response_class=HTMLResponse, status_code=status.HTTP_200_OK)
+async def render_demo_page(request: Request) -> HTMLResponse:
+    """Serves the main HTMX demo page."""
+    return templates.TemplateResponse("demo.html", {"request": request})

@@ -17,10 +17,10 @@ from src.db.models import aget_db_session
 from src.db.repositories.task_repository import TaskRepository
 from src.rabbitmq.base import BaseRabbitMQ
 from src.rabbitmq.producer import RabbitMQProducer
-from src.rabbitmq.utilities import map_priority_enum_to_int, queue_result_on_completion
+from src.rabbitmq.utilities import map_priority_enum_to_int
 from src.schemas.rabbitmq.base import QueueArguments
 from src.schemas.types import ErrorCodeEnum, PriorityEnum, TaskStatusEnum
-from src.services.storage import S3StorageService
+from src.services.storage import S3StorageLogUploadPolicy, S3StorageService
 from src.utilities import CircuitBreaker
 
 if TYPE_CHECKING:
@@ -65,6 +65,7 @@ class RabbitMQConsumer(BaseRabbitMQ):
         queue_name: str,
         callback: CONSUMER_CALLBACK_FN,
         durable: bool = True,
+        result_queue_name: str | None = None,
     ) -> None:
         """Consume messages from queue and pass to callback with robust error handling and retry logic.
 
@@ -76,13 +77,20 @@ class RabbitMQConsumer(BaseRabbitMQ):
             Async or sync callable that processes each message. Receives deserialized message dict.
         durable : bool, optional
             Whether the queue should be durable, by default True.
+        result_queue_name : str | None, optional
+            Name of the queue to publish results to upon successful completion.
         """
         # --------------- Infrastructure Setup ---------------
         await self.aconnect()
         producer = RabbitMQProducer(self.config)  # Used for re-publishing retries
         await producer.aconnect()  # Ensure producer is connected before use
 
-        s3_service = S3StorageService()
+        s3_log_policy = S3StorageLogUploadPolicy(
+            storage_service=S3StorageService(),
+            max_attempts=2,
+            base_delay=1.0,
+            raise_on_failure=False,  # Not critical to fail the task if logs can't be uploaded
+        )
         priority = app_config.rabbitmq_config.queue_priority
         priority_int = map_priority_enum_to_int(priority)
 
@@ -92,6 +100,16 @@ class RabbitMQConsumer(BaseRabbitMQ):
             dlq_name=self.config.rabbitmq_config.dlq_config.dlq_name,
             dlx_name=self.config.rabbitmq_config.dlq_config.dlx_name,
         )
+
+        if result_queue_name:
+            await self.aensure_queue(
+                queue_name=result_queue_name,
+                arguments=QueueArguments(
+                    x_dead_letter_exchange=None,  # No DLX for result queue
+                    x_max_priority=priority_int,
+                ),
+                durable=True,
+            )
 
         queue = await self.aensure_queue(
             queue_name=queue_name,
@@ -132,36 +150,65 @@ class RabbitMQConsumer(BaseRabbitMQ):
                 # If circuit breaker is OPEN, route message to delay queue without processing
                 if not self.breaker.can_execute():
                     logger.warning(
-                        f"Circuit Breaker is ({self.breaker.state.upper()}). "
+                        f"⚠️ Circuit Breaker is ({self.breaker.state.upper()}). "
                         f"Skipping message processing and moving message to '{delay_queue_name}'."
                     )
                     retry_headers = headers.copy()
                     # Update circuit breaker state in headers for downstream consumers
-                    # Don't increment retry count yet
+                    retry_headers["x-retry-count"] = retry_count + 1
                     retry_headers["x-circuit-breaker"] = self.breaker.state
-                    rmq_success, _ = await producer.apublish(
-                        message=json.loads(message.body.decode()),
-                        queue_name=delay_queue_name,
-                        priority=PriorityEnum.MEDIUM,
-                        headers=retry_headers,
-                        request_id=correlation_id,
-                        task_id=task_id,
-                        durable=durable,
-                    )
-                    if rmq_success:
-                        logger.info(
-                            f"[+] Message task_id={task_id} routed to '{delay_queue_name}' due "
-                            f"to {self.breaker.state.upper()} circuit breaker"
+
+                    if retry_count + 1 >= MAX_RETRIES:
+                        logger.error(
+                            f"❌ {ErrorCodeEnum.MAX_RETRIES_EXCEEDED}: Message task_id={task_id} "
+                            f"exceeded max retries while circuit breaker is {self.breaker.state.upper()}. "
+                            f"Routing to dead-letter queue."
                         )
-                        # Acknowledge current message to remove from queue
-                        await message.ack()
+                        try:
+                            # Update task status to FAILED before sending to DLQ
+                            async with aget_db_session() as db:
+                                task_repo = TaskRepository(db)
+                                await task_repo.aupdate_task_status(
+                                    task_id,
+                                    status=TaskStatusEnum.FAILED,
+                                    error=f"{ErrorCodeEnum.MAX_RETRIES_EXCEEDED}: "
+                                    f"Exceeded max retries while circuit breaker is "
+                                    f"{self.breaker.state.upper()}.",
+                                )
+                                await task_repo.aupdate_dlq_status(task_id, in_dlq=True)
+                        except Exception as db_error:
+                            logger.error(
+                                f"[-] {ErrorCodeEnum.DATABASE_ERROR}: Failed to update "
+                                f"task status for {task_id}: {db_error}"
+                            )
+                        finally:
+                            # Reject with requeue=False to route via DLX to DLQ
+                            await message.nack(requeue=False)
+                    else:
+                        # Re-publish to delay queue for retry after TTL
+                        rmq_success, _ = await producer.apublish(
+                            message=json.loads(message.body.decode()),
+                            queue_name=delay_queue_name,
+                            priority=PriorityEnum.MEDIUM,
+                            headers=retry_headers,
+                            request_id=correlation_id,
+                            task_id=task_id,
+                            durable=durable,
+                        )
+                        if rmq_success:
+                            logger.info(
+                                f"⚠️ Message task_id={task_id} routed to '{delay_queue_name}' due "
+                                f"to {self.breaker.state.upper()} circuit breaker"
+                            )
+                            # Acknowledge current message to remove from queue
+                            await message.ack()
+                            continue
+                        logger.error(
+                            f"[-] {ErrorCodeEnum.RABBITMQ_ERROR}: Failed to route message task_id={task_id} "
+                            f"to '{delay_queue_name}' during {self.breaker.state.upper()} state"
+                        )
+                        # Do not ack, let it be retried later
                         continue
-                    logger.error(
-                        f"[-] {ErrorCodeEnum.RABBITMQ_ERROR}: Failed to route message task_id={task_id} to "
-                        f"'{delay_queue_name}' during {self.breaker.state.upper()} state"
-                    )
-                    # Do not ack, let it be retried later
-                    continue
 
                 logger.info(
                     f"[+] Received message | task_id={task_id} | "
@@ -222,15 +269,16 @@ class RabbitMQConsumer(BaseRabbitMQ):
                                 # Business logic execution happens here
                                 try:
                                     # ----------- Task timeout enforcement -----------
+                                    execution_result = None
                                     if asyncio.iscoroutinefunction(callback):
-                                        await asyncio.wait_for(
+                                        execution_result = await asyncio.wait_for(
                                             callback(message_dict),
                                             timeout=self.config.rabbitmq_config.tasks_timeout,
                                         )
                                     else:
                                         # Convert sync function to async and run with timeout
                                         _async_version = asyncio.to_thread(callback, message_dict)
-                                        await asyncio.wait_for(
+                                        execution_result = await asyncio.wait_for(
                                             _async_version, timeout=self.config.rabbitmq_config.tasks_timeout
                                         )
 
@@ -239,26 +287,50 @@ class RabbitMQConsumer(BaseRabbitMQ):
                                     task_handler.close()
                                     # Upload logs to S3 if file has content
                                     if temp_path.stat().st_size > 0:
-                                        s3_success = await s3_service.aupload_file_to_s3(
+                                        upload_result = await s3_log_policy.aupload_with_retry(
                                             filepath=temp_path,
                                             task_id=task_id,
                                             correlation_id=correlation_id,
                                             environment=app_settings.ENV,
                                         )
-                                        if s3_success:
+                                        if not upload_result.error:
                                             # Update logs info in DB
-                                            s3_key = s3_service.get_object_name(task_id)
-                                            s3_url = s3_service.get_s3_object_url(task_id)
+                                            s3_key = upload_result.s3_key
+                                            s3_url = upload_result.s3_url
                                             await task_repo.aupdate_log_info(
                                                 task_id,
                                                 has_logs=True,
                                                 log_s3_key=s3_key,
                                                 log_s3_url=s3_url,
                                             )
+                                            # Publish result if enabled (reuses persistent connection)
+                                            if result_queue_name and execution_result is not None:
+                                                # Use standard format if raw generic result, else use as is
+                                                payload: dict[str, Any] = (
+                                                    execution_result
+                                                    if isinstance(execution_result, dict)
+                                                    else {"result": execution_result}
+                                                )
+                                                await producer.apublish(
+                                                    message=payload,
+                                                    queue_name=result_queue_name,
+                                                    priority=PriorityEnum.MEDIUM,
+                                                    task_id=task_id,
+                                                    request_id=correlation_id,
+                                                    durable=durable,
+                                                )
+                                                logger.info(
+                                                    f"[+] Published result to '{result_queue_name}': "
+                                                    f"task_id={task_id}"
+                                                )
                                         else:
                                             logger.error(
                                                 f"{ErrorCodeEnum.BLOB_STORAGE_ERROR}: [x] Failed to upload "
                                                 f"logs to S3 for task {task_id}"
+                                            )
+                                            await task_repo.aupdate_log_info(
+                                                task_id,
+                                                has_logs=False,
                                             )
 
                                     else:
@@ -291,16 +363,16 @@ class RabbitMQConsumer(BaseRabbitMQ):
                                     task_handler.close()
 
                                     if temp_path.exists() and temp_path.stat().st_size > 0:
-                                        s3_success = await s3_service.aupload_file_to_s3(
+                                        upload_result = await s3_log_policy.aupload_with_retry(
                                             filepath=temp_path,
                                             task_id=task_id,
                                             correlation_id=correlation_id,
                                             environment=app_settings.ENV,
                                         )
-                                        if s3_success:
+                                        if not upload_result.error:
                                             # Update logs info in DB
-                                            s3_key = s3_service.get_object_name(task_id)
-                                            s3_url = s3_service.get_s3_object_url(task_id)
+                                            s3_key = upload_result.s3_key
+                                            s3_url = upload_result.s3_url
                                             await task_repo.aupdate_log_info(
                                                 task_id,
                                                 has_logs=True,
@@ -314,6 +386,10 @@ class RabbitMQConsumer(BaseRabbitMQ):
                                             logger.error(
                                                 f"[x] {ErrorCodeEnum.BUSINESS_LOGIC_ERROR}: Failed to "
                                                 "upload logs to S3 for task {task_id} after BUSINESS ERROR"
+                                            )
+                                            await task_repo.aupdate_log_info(
+                                                task_id,
+                                                has_logs=False,
                                             )
                                     else:
                                         await task_repo.aupdate_log_info(
@@ -356,16 +432,16 @@ class RabbitMQConsumer(BaseRabbitMQ):
 
                                     # Log even if callback failed
                                     if temp_path.exists() and temp_path.stat().st_size > 0:
-                                        s3_success = await s3_service.aupload_file_to_s3(
+                                        upload_result = await s3_log_policy.aupload_with_retry(
                                             filepath=temp_path,
                                             task_id=task_id,
                                             correlation_id=correlation_id,
                                             environment=app_settings.ENV,
                                         )
-                                        if s3_success:
+                                        if not upload_result.error:
                                             # Update logs info in DB
-                                            s3_key = s3_service.get_object_name(task_id)
-                                            s3_url = s3_service.get_s3_object_url(task_id)
+                                            s3_key = upload_result.s3_key
+                                            s3_url = upload_result.s3_url
                                             await task_repo.aupdate_log_info(
                                                 task_id,
                                                 has_logs=True,
@@ -382,8 +458,10 @@ class RabbitMQConsumer(BaseRabbitMQ):
                                                 f"logs to S3 for task {task_id} after "
                                                 f"FAILURE: {callback_error} "
                                             )
-                                            # Trigger the retry logic below
-                                            raise callback_error
+                                            await task_repo.aupdate_log_info(
+                                                task_id,
+                                                has_logs=False,
+                                            )
                                     else:
                                         await task_repo.aupdate_log_info(
                                             task_id,
@@ -398,8 +476,6 @@ class RabbitMQConsumer(BaseRabbitMQ):
                                         f"[x] {ErrorCodeEnum.UNEXPECTED_ERROR}: Task "
                                         f"{task_id} FAILED: {callback_error}"
                                     )
-                                    # Trigger the retry logic below
-                                    raise callback_error
 
                     except (ConnectionError, DatabaseError) as infra_error:
                         # Infrastructure error - do not mark task as FAILED
@@ -408,11 +484,11 @@ class RabbitMQConsumer(BaseRabbitMQ):
                         # Route to `dead-letter queue` for later processing
                         if retry_count == MAX_RETRIES:
                             logger.error(
-                                f"[x] {ErrorCodeEnum.MAX_RETRIES_EXCEEDED}: Infrastructure "
+                                f"❌ {ErrorCodeEnum.MAX_RETRIES_EXCEEDED}: Infrastructure "
                                 f"error persisted after {MAX_RETRIES} |"
                                 f"attempts for task_id={task_id}. Routing message to dead-letter queue."
                             )
-                            # Raise to trigger message requeue
+                            # Raise to trigger routing to DLQ
                             raise infra_error
 
                 except (json.JSONDecodeError, UnicodeDecodeError) as poison_err:
@@ -459,7 +535,7 @@ class RabbitMQConsumer(BaseRabbitMQ):
                         await message.ack()
                     else:
                         logger.error(
-                            f"[x] {ErrorCodeEnum.MAX_RETRIES_EXCEEDED}: Exhausted all retries for "
+                            f"❌ {ErrorCodeEnum.MAX_RETRIES_EXCEEDED}: Exhausted all retries for "
                             f"task_id={task_id}. CircuitBreaker state '{self.breaker.state}'. "
                             "\nSending to dead-letter queue."
                         )
@@ -497,7 +573,6 @@ async def process_data_chunk(chunk_id: int, data: dict[str, Any]) -> None:  # no
     logger.debug(f"  [Sub-Task] Chunk {chunk_id} successfully transformed.")
 
 
-@queue_result_on_completion(queue_name="task_queue_results")
 async def example_consumer_callback(message: dict[str, Any]) -> dict[str, Any]:
     """
     Complex callback to test multi-level logging capture and S3 upload.
@@ -589,6 +664,7 @@ async def run_worker(callback: CONSUMER_CALLBACK_FN) -> None:
                     queue_name=app_config.rabbitmq_config.queue_names.task_queue,
                     callback=callback,
                     durable=True,  # Queue survives broker restarts
+                    result_queue_name=app_config.rabbitmq_config.queue_names.result_queue,
                 )
             )
 

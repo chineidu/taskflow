@@ -1,0 +1,29 @@
+{% for task in tasks %}
+<div id="task-{{ task.task_id }}" class="flex items-center justify-between p-4 mb-2 bg-slate-800 rounded-lg border-l-4 
+            {% if task.status == 'completed' %} border-green-500 
+            {% elif task.status == 'failed' %} border-red-500 
+            {% else %} border-yellow-500 animate-pulse {% endif %}" {% if task.status not in ['completed', 'failed' ]
+    %} hx-get="/api/v1/jobs/{{ task.task_id }}/status-fragment" hx-trigger="every 3s" hx-target="this"
+    hx-swap="outerHTML" {% endif %}>
+
+    <div class="flex flex-col">
+        <span class="text-[10px] font-mono text-slate-500 uppercase tracking-tighter">
+            Task ID: {{ task.task_id[:8] }}
+        </span>
+        <span class="font-bold text-sm text-slate-200">
+            Status: {{ task.status.value if hasattr(task.status, 'value') else task.status }}
+        </span>
+    </div>
+
+    <div class="flex items-center gap-3">
+        {% if task.status == 'completed' %}
+        <span class="text-green-400 font-bold">Done</span>
+        <span class="bg-green-500/20 text-green-400 p-1 rounded-full text-xs">✓</span>
+        {% elif task.status == 'failed' %}
+        <span class="text-red-400 font-bold">Failed</span>
+        {% else %}
+        <span class="text-yellow-500 text-xs italic">Queued...</span>
+        {% endif %}
+    </div>
+</div>
+{% endfor %}

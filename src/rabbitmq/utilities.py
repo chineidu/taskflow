@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 from functools import wraps
 from typing import Any, Awaitable, Callable, ParamSpec, TypeVar, overload
 
@@ -128,6 +129,8 @@ def queue_result_on_completion(
                     # Execute the function
                     result = await f(*args, **kwargs)
                     payload = result if isinstance(result, dict) else {"result": result}
+                    timestamp = datetime.now().isoformat()
+                    headers: dict[str, Any] = {"timestamp": timestamp, "task_id": task_id_key}
 
                     # Publish the result to the specified queue
                     async with producer.aconnection_context():
@@ -141,6 +144,7 @@ def queue_result_on_completion(
                             priority=priority,
                             task_id=task_id_key,
                             durable=True,
+                            headers=headers
                         )
                         logger.info(f"[+] Published result to '{queue_name}': task_id={task_id}")
                     return result
@@ -157,12 +161,15 @@ def queue_result_on_completion(
                             "function_name": f.__name__,
                             "exception_type": type(e).__name__,
                         }
+                        timestamp = datetime.now().isoformat()
+                        headers: dict[str, Any] = {"timestamp": timestamp, "task_id": task_id_key}
 
                         await producer.apublish(
                             message=error_payload,
                             queue_name=dlq_name,
                             priority=priority,
                             task_id="error_unknown",
+                            headers=headers
                         )
                         logger.error(f"[x] Published error to DLQ '{dlq_name}'")
                     raise
@@ -179,6 +186,8 @@ def queue_result_on_completion(
                 # Execute the function
                 result = f(*args, **kwargs)
                 payload = result if isinstance(result, dict) else {"result": result}
+                timestamp = datetime.now().isoformat()
+                headers: dict[str, Any] = {"timestamp": timestamp, "task_id": task_id_key}
 
                 # Publish the result to the specified queue
                 async def _publish_success() -> None:
@@ -192,6 +201,7 @@ def queue_result_on_completion(
                             queue_name=queue_name,
                             priority=priority,
                             task_id=task_id_key,
+                            headers=headers,
                             durable=True,
                         )
                         logger.info(f"[+] Published result to '{queue_name}': task_id={task_id}")
@@ -213,12 +223,15 @@ def queue_result_on_completion(
                             "function_name": f.__name__,
                             "exception_type": type(e).__name__,
                         }
+                        timestamp = datetime.now().isoformat()
+                        headers: dict[str, Any] = {"timestamp": timestamp, "task_id": task_id_key}
 
                         await producer.apublish(
                             message=error_payload,
                             priority=priority,
                             queue_name=dlq_name,
                             task_id="error_unknown",
+                            headers=headers
                         )
                         logger.error(f"[x] Published error to DLQ '{dlq_name}'")
 
