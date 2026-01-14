@@ -12,6 +12,7 @@ from src.schemas.types import PriorityEnum
 class QueueNames:
     task_queue: str = field(metadata={"description": "Name of the task queue"})
     result_queue: str = field(metadata={"description": "Name of the result queue"})
+    progress_queue: str = field(metadata={"description": "Name of the progress reporting queue"})
 
 
 @dataclass(slots=True, kw_only=True)

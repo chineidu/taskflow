@@ -42,6 +42,7 @@ Each section outlines a specific architectural choice, the rationale behind it, 
       - [States](#states)
     - [State Transitions](#state-transitions)
     - [When Should Circuit Breakers Be Used?](#when-should-circuit-breakers-be-used)
+    - [Progress Reporting Callback](#progress-reporting-callback)
 
 <!-- /TOC -->
 
@@ -302,3 +303,14 @@ HALF-OPEN      -> (failure)                        -> OPEN
   - Integrated a circuit breaker mechanism in the consumer service when using infrastructure resources. i.e. not business logic
   - Even though storage service is part of infrastructure resources, it's not a critical component (used for storing logs and observability) and it's not integrated with the circuit breaker.
   - Configured thresholds for failure rates and timeouts to trip the circuit breaker appropriately.
+
+### Progress Reporting Callback
+
+- **Decision**: This system treats progress reporting as part of task state management and not best-effort reporting.
+- **Rationale**:
+  - Progress updates are critical for monitoring long-running tasks.
+  
+- **Implementation**:
+  - The consumer accepts a callback function that reports progress percentage.
+  - This callback is invoked periodically during task execution to update the task's progress in the database.
+  

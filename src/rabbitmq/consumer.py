@@ -19,7 +19,7 @@ from src.rabbitmq.base import BaseRabbitMQ
 from src.rabbitmq.producer import RabbitMQProducer
 from src.rabbitmq.utilities import map_priority_enum_to_int
 from src.schemas.rabbitmq.base import QueueArguments
-from src.schemas.types import ErrorCodeEnum, PriorityEnum, TaskStatusEnum
+from src.schemas.types import ErrorCodeEnum, PriorityEnum, TaskEventTypeEnum, TaskStatusEnum
 from src.services.storage import S3StorageLogUploadPolicy, S3StorageService
 from src.utilities import CircuitBreaker
 
@@ -33,8 +33,15 @@ DELAY_BETWEEN_RETRIES: int = app_config.rabbitmq_config.retry_backoff_delay
 SYSTEM_FAILURE_THRESHOLD: int = app_config.rabbitmq_config.circuit_breaker_config.failure_threshold
 SYSTEM_RECOVERY_TIMEOUT: int = app_config.rabbitmq_config.circuit_breaker_config.recovery_timeout
 
-# Takes a [deserialized message dict] and returns [Any]
-type CONSUMER_CALLBACK_FN = Callable[[dict[str, Any]], Awaitable[None] | Any]
+# Takes a [deserialized message dict and a callback] and returns [Any]
+type CONSUMER_CALLBACK_FN = Callable[
+    [
+        dict[str, Any],
+        # Callback to report progress percentage
+        Callable[[int], Awaitable[None] | None],
+    ],
+    Awaitable[Any] | Any,
+]
 
 
 class RabbitMQConsumer(BaseRabbitMQ):
@@ -91,6 +98,7 @@ class RabbitMQConsumer(BaseRabbitMQ):
             base_delay=1.0,
             raise_on_failure=False,  # Not critical to fail the task if logs can't be uploaded
         )
+        progress_queue_name = app_config.rabbitmq_config.queue_names.progress_queue
         priority = app_config.rabbitmq_config.queue_priority
         priority_int = map_priority_enum_to_int(priority)
 
@@ -101,6 +109,7 @@ class RabbitMQConsumer(BaseRabbitMQ):
             dlx_name=self.config.rabbitmq_config.dlq_config.dlx_name,
         )
 
+        # --------------- Setup queues ---------------
         if result_queue_name:
             await self.aensure_queue(
                 queue_name=result_queue_name,
@@ -127,6 +136,15 @@ class RabbitMQConsumer(BaseRabbitMQ):
             target_queue_name=queue_name,
             ttl_ms=self.config.rabbitmq_config.dlq_config.ttl,
         )
+        # Progress queue
+        await self.aensure_queue(
+            queue_name=progress_queue_name,
+            arguments=QueueArguments(
+                x_dead_letter_exchange=None,
+                x_max_priority=priority_int,
+            ),
+            durable=True,
+        )
 
         logger.info(f"[+] Starting to consume from queue: '{queue_name}'")
 
@@ -146,6 +164,95 @@ class RabbitMQConsumer(BaseRabbitMQ):
                 retry_count: int = headers.get("x-retry-count", 0)
                 idempotency_key: str = headers.get("Idempotency-Key", "none")
 
+                # ----------- Helper functions for progress and event reporting -----------
+                async def aprogress_reporter(
+                    percentage: int,
+                    _task_id: str = task_id,
+                    _correlation_id: str = correlation_id,
+                ) -> None:
+                    """Report task progress by publishing progress updates."""
+                    await producer.apublish(
+                        message={
+                            "task_id": _task_id,
+                            "correlation_id": _correlation_id,
+                            "progress": percentage,
+                            "status": "processing",
+                        },
+                        queue_name=progress_queue_name,
+                        priority=PriorityEnum.HIGH,
+                        headers={"event_type": TaskEventTypeEnum.TASK_PROGRESS},
+                    )
+
+                def progress_reporter(
+                    percentage: int,
+                    _task_id: str = task_id,
+                    _correlation_id: str = correlation_id,
+                ) -> None:
+                    """Report task progress from sync functions by scheduling async
+                    publish. This function blocks the worker thread briefly.
+
+                    For a fire-and-forget approach, consider tweaking the implementation here.
+                    """
+                    # Schedule the coroutine on the main loop and block
+                    # this thread until done
+                    loop = asyncio.get_running_loop()
+                    future = asyncio.run_coroutine_threadsafe(
+                        aprogress_reporter(percentage, _task_id, _correlation_id), loop
+                    )
+                    try:
+                        # Blocks the worker thread (not main event loop)
+                        future.result(timeout=2.0)
+                    except TimeoutError:
+                        logger.warning(f"[progress] timeout task_id={_task_id} progress={percentage}")
+                    except Exception as e:
+                        logger.error(
+                            f"[-] Failed to report progress for task_id={_task_id}: {e} progress={percentage}"
+                        )
+
+                async def apublish_task_event(
+                    event_type: TaskEventTypeEnum | str,
+                    status: TaskStatusEnum | str,
+                    message: str | None = None,
+                    error: str | None = None,
+                    _task_id: str = task_id,
+                    _correlation_id: str = correlation_id,
+                ) -> None:
+                    """Publish task events such as failure or completion, etc."""
+                    event_data: dict[str, Any] = {
+                        "task_id": _task_id,
+                        "correlation_id": _correlation_id,
+                        "status": status if isinstance(status, str) else status.value,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                    if message:
+                        event_data["message"] = message
+                    if error:
+                        event_data["error"] = error
+
+                    await producer.apublish(
+                        message=event_data,
+                        queue_name=progress_queue_name,
+                        priority=PriorityEnum.HIGH,
+                        request_id=_correlation_id,
+                        headers={
+                            "event_type": event_type if isinstance(event_type, str) else event_type.value
+                        },
+                    )
+
+                # ----------- Begin Processing Logic -----------
+                msg = (
+                    f"[*] Handling message | task_id={task_id} | correlation_id={correlation_id} "
+                    f"| time={timestamp} | retry_count={retry_count}"
+                )
+                logger.info(msg)
+                await apublish_task_event(
+                    event_type=TaskEventTypeEnum.TASK_CREATED,
+                    status=TaskStatusEnum.IN_PROGRESS,
+                    message=msg,
+                    _task_id=task_id,
+                    _correlation_id=correlation_id,
+                )
+
                 # --------------- Circuit Breaker Check ---------------
                 # If circuit breaker is OPEN, route message to delay queue without processing
                 if not self.breaker.can_execute():
@@ -159,11 +266,12 @@ class RabbitMQConsumer(BaseRabbitMQ):
                     retry_headers["x-circuit-breaker"] = self.breaker.state
 
                     if retry_count + 1 >= MAX_RETRIES:
-                        logger.error(
+                        error_msg = (
                             f"❌ {ErrorCodeEnum.MAX_RETRIES_EXCEEDED}: Message task_id={task_id} "
                             f"exceeded max retries while circuit breaker is {self.breaker.state.upper()}. "
                             f"Routing to dead-letter queue."
                         )
+                        logger.error(error_msg)
                         try:
                             # Update task status to FAILED before sending to DLQ
                             async with aget_db_session() as db:
@@ -182,9 +290,21 @@ class RabbitMQConsumer(BaseRabbitMQ):
                                 f"task status for {task_id}: {db_error}"
                             )
                         finally:
+                            # Publish failure event before marking FAILED
+                            await apublish_task_event(
+                                event_type=TaskEventTypeEnum.TASK_ROUTED_TO_DELAY_QUEUE,
+                                status=TaskStatusEnum.PENDING,
+                                error=error_msg,
+                                _task_id=task_id,
+                                _correlation_id=correlation_id,
+                            )
                             # Reject with requeue=False to route via DLX to DLQ
                             await message.nack(requeue=False)
                     else:
+                        error_msg = (
+                            f"⚠️ Circuit breaker is {self.breaker.state.upper()}. Routing message "
+                            f"task_id={task_id} to delay queue '{delay_queue_name}' for retry."
+                        )
                         # Re-publish to delay queue for retry after TTL
                         rmq_success, _ = await producer.apublish(
                             message=json.loads(message.body.decode()),
@@ -207,18 +327,30 @@ class RabbitMQConsumer(BaseRabbitMQ):
                             f"[-] {ErrorCodeEnum.RABBITMQ_ERROR}: Failed to route message task_id={task_id} "
                             f"to '{delay_queue_name}' during {self.breaker.state.upper()} state"
                         )
+
+                        await apublish_task_event(
+                            event_type=TaskEventTypeEnum.TASK_ROUTED_TO_DELAY_QUEUE,
+                            status=TaskStatusEnum.PENDING,
+                            error=error_msg,
+                            _task_id=task_id,
+                            _correlation_id=correlation_id,
+                        )
                         # Do not ack, let it be retried later
                         continue
 
-                logger.info(
-                    f"[+] Received message | task_id={task_id} | "
-                    f"correlation_id={correlation_id} | timestamp={timestamp}"
-                )
                 # --------------- Core Processing ---------------
                 try:
-                    logger.debug(
+                    msg = (
                         f"[*] Processing task_id={task_id} | Attempt {retry_count}/{MAX_RETRIES} "
                         f"failure_count={self.breaker.failure_count}/{self.breaker.failure_threshold}. \n"
+                    )
+                    logger.info(msg)
+                    await apublish_task_event(
+                        event_type=TaskEventTypeEnum.TASK_STARTED,
+                        status=TaskStatusEnum.IN_PROGRESS,
+                        error=msg,
+                        _task_id=task_id,
+                        _correlation_id=correlation_id,
                     )
                     # Deserialize message
                     message_body: str = message.body.decode()
@@ -265,19 +397,20 @@ class RabbitMQConsumer(BaseRabbitMQ):
                                 task_handler = add_file_handler(logger, tmp_file.name, structured=True)
                                 temp_path = Path(tmp_file.name)
 
-                                # ----------- Call the provided callback function -----------
                                 # Business logic execution happens here
                                 try:
                                     # ----------- Task timeout enforcement -----------
                                     execution_result = None
                                     if asyncio.iscoroutinefunction(callback):
                                         execution_result = await asyncio.wait_for(
-                                            callback(message_dict),
+                                            callback(message_dict, aprogress_reporter),
                                             timeout=self.config.rabbitmq_config.tasks_timeout,
                                         )
                                     else:
                                         # Convert sync function to async and run with timeout
-                                        _async_version = asyncio.to_thread(callback, message_dict)
+                                        _async_version = asyncio.to_thread(
+                                            callback, message_dict, progress_reporter
+                                        )
                                         execution_result = await asyncio.wait_for(
                                             _async_version, timeout=self.config.rabbitmq_config.tasks_timeout
                                         )
@@ -318,10 +451,11 @@ class RabbitMQConsumer(BaseRabbitMQ):
                                                     task_id=task_id,
                                                     request_id=correlation_id,
                                                     durable=durable,
+                                                    headers={"event_type": "task.completed"},
                                                 )
                                                 logger.info(
-                                                    f"[+] Published result to '{result_queue_name}': "
-                                                    f"task_id={task_id}"
+                                                    f"[+] Completion event published to "
+                                                    f"'{result_queue_name}': task_id={task_id}"
                                                 )
                                         else:
                                             logger.error(
@@ -349,14 +483,31 @@ class RabbitMQConsumer(BaseRabbitMQ):
                                     # Acknowledge message and remove from queue
                                     await message.ack()
                                     self.breaker.record_success()
-                                    logger.info(f"[+] Task {task_id} COMPLETED successfully")
+                                    msg = f"[+] Task {task_id} COMPLETED successfully"
+                                    logger.info(msg)
+
+                                    # Publish completion event before marking COMPLETED
+                                    await apublish_task_event(
+                                        event_type=TaskEventTypeEnum.TASK_COMPLETED,
+                                        status=TaskStatusEnum.COMPLETED,
+                                        message=msg,
+                                        _task_id=task_id,
+                                        _correlation_id=correlation_id,
+                                    )
 
                                 except (ValueError, KeyError, TypeError) as biz_logic_err:
                                     # Business logic error inside callback. These errors are not retried
                                     # because they can't be fixed until manual fix is done
-                                    logger.error(
-                                        f"[x] {ErrorCodeEnum.BUSINESS_LOGIC_ERROR} in task "
-                                        f"{task_id}: {biz_logic_err}"
+                                    error_msg = f"{ErrorCodeEnum.BUSINESS_LOGIC_ERROR}: {str(biz_logic_err)}"
+                                    logger.error(f"[x] {error_msg} in task {task_id}")
+
+                                    # Publish failure event before marking FAILED
+                                    await apublish_task_event(
+                                        event_type=TaskEventTypeEnum.TASK_FAILED,
+                                        status=TaskStatusEnum.FAILED,
+                                        error=error_msg,
+                                        _task_id=task_id,
+                                        _correlation_id=correlation_id,
                                     )
                                     # Cleanup logging handler and upload the logs collected so far
                                     logger.removeHandler(task_handler)
@@ -411,10 +562,19 @@ class RabbitMQConsumer(BaseRabbitMQ):
                                     )
 
                                 except asyncio.TimeoutError as timeout_err:
-                                    logger.error(
-                                        f"[x] {ErrorCodeEnum.TIMEOUT_ERROR}: Task {task_id} timed out"
-                                        f"after {self.config.rabbitmq_config.tasks_timeout} seconds:"
-                                        f" {timeout_err} "
+                                    error_msg = (
+                                        f"{ErrorCodeEnum.TIMEOUT_ERROR}: Task {task_id} timed out "
+                                        f"after {self.config.rabbitmq_config.tasks_timeout} seconds"
+                                    )
+                                    logger.error(f"[x] {error_msg} after timeout")
+
+                                    # Publish failure event before marking FAILED
+                                    await apublish_task_event(
+                                        event_type=TaskEventTypeEnum.TASK_FAILED,
+                                        status=TaskStatusEnum.FAILED,
+                                        error=error_msg,
+                                        _task_id=task_id,
+                                        _correlation_id=correlation_id,
                                     )
                                     # Propagate to retry logic. Retrying may help if timeout was due
                                     # to transient issues
@@ -472,9 +632,19 @@ class RabbitMQConsumer(BaseRabbitMQ):
                                         status=TaskStatusEnum.FAILED,
                                         error=f"{ErrorCodeEnum.UNEXPECTED_ERROR}: {str(callback_error)}",
                                     )
-                                    logger.error(
-                                        f"[x] {ErrorCodeEnum.UNEXPECTED_ERROR}: Task "
-                                        f"{task_id} FAILED: {callback_error}"
+                                    error_msg = (
+                                        f"{ErrorCodeEnum.UNEXPECTED_ERROR}: Task {task_id} FAILED due to "
+                                        f"unexpected error: {str(callback_error)}"
+                                    )
+                                    logger.error(f"[x] {error_msg} in task {task_id}")
+
+                                    # Publish failure event before marking FAILED
+                                    await apublish_task_event(
+                                        event_type=TaskEventTypeEnum.TASK_FAILED,
+                                        status=TaskStatusEnum.FAILED,
+                                        error=error_msg,
+                                        _task_id=task_id,
+                                        _correlation_id=correlation_id,
                                     )
 
                     except (ConnectionError, DatabaseError) as infra_error:
@@ -483,20 +653,39 @@ class RabbitMQConsumer(BaseRabbitMQ):
                         logger.error(f"[x] Infrastructure error for task_id={task_id}: {infra_error}")
                         # Route to `dead-letter queue` for later processing
                         if retry_count == MAX_RETRIES:
-                            logger.error(
-                                f"❌ {ErrorCodeEnum.MAX_RETRIES_EXCEEDED}: Infrastructure "
-                                f"error persisted after {MAX_RETRIES} |"
-                                f"attempts for task_id={task_id}. Routing message to dead-letter queue."
+                            error_msg = (
+                                f"❌ {ErrorCodeEnum.MAX_RETRIES_EXCEEDED}: Infrastructure error persisted "
+                                f"after {MAX_RETRIES} attempts for task_id={task_id}. Routing message "
+                                "to dead-letter queue."
                             )
+                            logger.error(f"{error_msg}")
+                            # Publish failure event before marking FAILED
+                            await apublish_task_event(
+                                event_type=TaskEventTypeEnum.TASK_FAILED,
+                                status=TaskStatusEnum.FAILED,
+                                error=error_msg,
+                                _task_id=task_id,
+                                _correlation_id=correlation_id,
+                            )
+
                             # Raise to trigger routing to DLQ
                             raise infra_error
 
                 except (json.JSONDecodeError, UnicodeDecodeError) as poison_err:
                     # Poison message: Log and ACK to remove from queue
-                    logger.error(
-                        f"{ErrorCodeEnum.POISON_MESSAGE}: Dropping poison message with "
-                        f"task_id={task_id}, "
-                        f"correlation_id={message.correlation_id}: {poison_err}"
+                    error_msg = (
+                        f"{ErrorCodeEnum.POISON_MESSAGE}: Poison message detected for "
+                        f"task_id={task_id}: {poison_err}"
+                    )
+                    logger.error(f"[x] {error_msg} - Acknowledging to remove from queue.")
+
+                    # Publish failure event before marking FAILED
+                    await apublish_task_event(
+                        event_type=TaskEventTypeEnum.TASK_FAILED,
+                        status=TaskStatusEnum.FAILED,
+                        error=error_msg,
+                        _task_id=task_id,
+                        _correlation_id=correlation_id,
                     )
                     # Do not retry poison errors. Acknowledge to remove from queue.
                     await message.ack()
@@ -509,13 +698,14 @@ class RabbitMQConsumer(BaseRabbitMQ):
                     self.breaker.record_failure()
 
                     if retry_count < MAX_RETRIES:
-                        logger.warning(
+                        error_msg = (
                             f"[x] Error processing task_id={task_id}. \n"
                             f"Attempt {retry_count + 1}/{MAX_RETRIES}. "
                             f"CircuitBreaker state '{self.breaker.state}'. "
                             f"failure_count={self.breaker.failure_count}/{self.breaker.failure_threshold}. \n"
                             f"Retrying via the Wait Queue..."
                         )
+                        logger.warning(error_msg)
                         retry_headers = headers.copy()
                         retry_headers["x-retry-count"] = retry_count + 1
                         retry_headers["x-circuit-breaker-state"] = self.breaker.state
@@ -531,14 +721,24 @@ class RabbitMQConsumer(BaseRabbitMQ):
                             task_id=task_id,
                             durable=durable,
                         )
+
+                        # Publish failure event before marking FAILED
+                        await apublish_task_event(
+                            event_type=TaskEventTypeEnum.TASK_FAILED,
+                            status=TaskStatusEnum.FAILED,
+                            error=error_msg,
+                            _task_id=task_id,
+                            _correlation_id=correlation_id,
+                        )
                         # Acknowledge current message to remove from queue
                         await message.ack()
                     else:
-                        logger.error(
+                        error_msg = (
                             f"❌ {ErrorCodeEnum.MAX_RETRIES_EXCEEDED}: Exhausted all retries for "
                             f"task_id={task_id}. CircuitBreaker state '{self.breaker.state}'. "
                             "\nSending to dead-letter queue."
                         )
+                        logger.error(error_msg)
                         # Update task status to FAILED before sending to DLQ
                         # Re-using existing DB session from DB pool
                         try:
@@ -557,6 +757,14 @@ class RabbitMQConsumer(BaseRabbitMQ):
                                 f"task status for {task_id}: {db_error}"
                             )
                         finally:
+                            # Publish failure event before marking FAILED
+                            await apublish_task_event(
+                                event_type=TaskEventTypeEnum.TASK_FAILED,
+                                status=TaskStatusEnum.FAILED,
+                                error=error_msg,
+                                _task_id=task_id,
+                                _correlation_id=correlation_id,
+                            )
                             # Reject with requeue=False to route via DLX to DLQ
                             await message.nack(requeue=False)
 
@@ -573,7 +781,9 @@ async def process_data_chunk(chunk_id: int, data: dict[str, Any]) -> None:  # no
     logger.debug(f"  [Sub-Task] Chunk {chunk_id} successfully transformed.")
 
 
-async def example_consumer_callback(message: dict[str, Any]) -> dict[str, Any]:
+async def example_consumer_callback(
+    message: dict[str, Any], report_progress: Callable[[int], Awaitable[None] | None] | None = None
+) -> dict[str, Any]:
     """
     Complex callback to test multi-level logging capture and S3 upload.
     """
@@ -584,6 +794,10 @@ async def example_consumer_callback(message: dict[str, Any]) -> dict[str, Any]:
     logger.info(f"Target Payload: {json.dumps(task_data, indent=2)[:70]}...[TRUNCATED]")
 
     try:
+        if report_progress:
+            result = report_progress(5)  # 5% (Started)
+            if result is not None and asyncio.iscoroutine(result):
+                await result
         # Phase 1: Validation
         logger.info("Phase 1: Validating input schema...")
         if not task_data:
@@ -592,10 +806,19 @@ async def example_consumer_callback(message: dict[str, Any]) -> dict[str, Any]:
         await asyncio.sleep(0.3)
         logger.info("✅ Validation complete.")
 
+        if report_progress:
+            result = report_progress(20)  # 20%
+            if result is not None and asyncio.iscoroutine(result):
+                await result
         # Phase 2: Transformation (Nested Logging)
         logger.info("Phase 2: Processing data chunks...")
         for i in range(1, 4):
             await process_data_chunk(i, task_data)
+            # Incremental progress update
+            if report_progress:
+                result = report_progress(20 + (i * 13))  # 20 -> 60%
+                if result is not None and asyncio.iscoroutine(result):
+                    await result
         logger.info("✅ All 3 chunks processed.")
 
         # Phase 3: External 'Service' simulation
@@ -605,11 +828,19 @@ async def example_consumer_callback(message: dict[str, Any]) -> dict[str, Any]:
         # Randomly simulate an 'insight' for the log
         confidence = random.uniform(0.85, 0.99)
         logger.info(f"🤖 AI Inference complete. Confidence Score: {confidence:.2%}")
+        if report_progress:
+            result = report_progress(85)  # 85%
+            if result is not None and asyncio.iscoroutine(result):
+                await result
 
         # Summary
         end_time = time.perf_counter()
         duration = end_time - start_time
         logger.info(f"🏁 Task execution finished successfully in {duration:.2f} seconds.")
+        if report_progress:
+            result = report_progress(100)  # 100%
+            if result is not None and asyncio.iscoroutine(result):
+                await result
         return {
             "status": "success",
             "result": {k: f"{v}" * 2 for k, v in task_data.items()},

@@ -41,6 +41,15 @@ class TaskStatusEnum(StrEnum):
     FAILED = "failed"
 
 
+class TaskEventTypeEnum(StrEnum):
+    TASK_CREATED = "task.created"
+    TASK_STARTED = "task.started"
+    TASK_PROGRESS = "task.progress"
+    TASK_ROUTED_TO_DELAY_QUEUE = "task.routed_to_delay_queue"
+    TASK_COMPLETED = "task.completed"
+    TASK_FAILED = "task.failed"
+
+
 class PriorityEnum(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
