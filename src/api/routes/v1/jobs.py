@@ -120,7 +120,7 @@ async def submit_job(
 
     if request.headers.get("HX-Request"):
         # If the request comes from HTMX, return the fragment immediately
-        return templates.TemplateResponse("task_row.html", {"request": request, "task": tasks})
+        return templates.TemplateResponse("task_row.html", {"request": request, "tasks": tasks})
 
     return JobSubmissionResponseSchema(
         task_ids=response.task_ids,
@@ -289,6 +289,8 @@ async def stream_task_updates(websocket: WebSocket, task_id: str) -> None:
         await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
         return
 
+    channel = None
+    queue = None
     try:
         channel = await rmq_object.connection.channel()
         # Declare or ensure the topic exchange where progress events are published.
@@ -299,7 +301,7 @@ async def stream_task_updates(websocket: WebSocket, task_id: str) -> None:
             durable=True,
             auto_delete=False,
         )
-        
+
         # Create a temporary, exclusive queue for this WebSocket connection.
         # Exclusive means the queue is deleted when this consumer disconnects.
         queue = await channel.declare_queue(exclusive=True)
@@ -320,7 +322,7 @@ async def stream_task_updates(websocket: WebSocket, task_id: str) -> None:
                     # Decode the message body and send it to the WebSocket client.
                     event_data = json.loads(message.body.decode())
                     await websocket.send_json(event_data)
-                    
+
                     # If the task has reached a terminal state, stop streaming.
                     # This returns from the endpoint, which will trigger cleanup.
                     if event_data.get("status") in ["completed", "failed"]:
@@ -333,6 +335,14 @@ async def stream_task_updates(websocket: WebSocket, task_id: str) -> None:
         logger.error(f"[x] Unexpected WebSocket error for {task_id}: {e}", exc_info=True)
         await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
     finally:
-        # Cleanup: Close WebSocket and RabbitMQ connection
+        # Cleanup: Explicitly delete the temporary queue before disconnecting
+        if queue is not None and channel is not None:
+            try:
+                await queue.delete(if_empty=False, if_unused=False)
+                logger.info(f"[+] Deleted temporary queue for task: {task_id}")
+            except Exception as e:
+                logger.warning(f"[!] Failed to delete queue for {task_id}: {e}")
+
+        # Close WebSocket and RabbitMQ connection
         await websocket.close(code=status.WS_1000_NORMAL_CLOSURE)
         await rmq_object.adisconnect()

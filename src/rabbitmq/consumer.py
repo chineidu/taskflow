@@ -215,17 +215,15 @@ class RabbitMQConsumer(BaseRabbitMQ):
                         )
 
                 async def apublish_task_event(
-                    event_type: TaskEventTypeEnum | str,
-                    status: TaskStatusEnum | str,
+                    event_type: TaskEventTypeEnum,
+                    status: TaskStatusEnum,
                     message: str | None = None,
                     error: str | None = None,
                     _task_id: str = task_id,
                     _correlation_id: str = correlation_id,
                 ) -> None:
                     """Publish task events such as failure or completion, etc."""
-                    routing_key: str = (
-                        f"{event_type if isinstance(event_type, str) else event_type.value}.{_task_id}"
-                    )
+                    routing_key: str = f"{event_type.value}.{_task_id}"
                     event_data: dict[str, Any] = {
                         "task_id": _task_id,
                         "correlation_id": _correlation_id,
@@ -245,7 +243,7 @@ class RabbitMQConsumer(BaseRabbitMQ):
                         correlation_id=_correlation_id,
                         headers={
                             "task_id": _task_id,
-                            "event_type": event_type if isinstance(event_type, str) else event_type.value,
+                            "event_type": event_type.value,
                         },
                     )
 
@@ -256,7 +254,8 @@ class RabbitMQConsumer(BaseRabbitMQ):
                         )
                     except Exception as e:
                         logger.error(
-                            f"Failed to publish {event_type} event for task {_task_id}: {e}", exc_info=True
+                            f"Failed to publish {event_type.value} event for task {_task_id}: {e}",
+                            exc_info=True,
                         )
 
                 # ----------- Begin Processing Logic -----------
