@@ -1,6 +1,6 @@
 import asyncio
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, AsyncGenerator
+from typing import TYPE_CHECKING, Any, AsyncGenerator
 
 import aio_pika
 
@@ -219,7 +219,7 @@ class BaseRabbitMQ:
             raise RuntimeError("[-] Failed to establish channel connection")
 
         try:
-            arguments = {
+            arguments: dict[str, Any] = {
                 "x-dead-letter-exchange": "",  # Default exchange
                 "x-dead-letter-routing-key": target_queue_name,
                 "x-message-ttl": ttl_ms,
@@ -234,6 +234,43 @@ class BaseRabbitMQ:
 
         except aio_pika.exceptions.AMQPException as e:
             logger.error(f"Failed to declare delay queue '{delay_queue_name}': {e}")
+            raise
+
+    async def aensure_topic(
+        self,
+        topic_name: str,
+        durable: bool = True,
+    ) -> aio_pika.abc.AbstractExchange:
+        """Ensure topic exchange exists with specified settings. Idempotent operation.
+
+        Parameters
+        ----------
+        topic_name : str
+            The name of the topic exchange to ensure.
+        durable : bool, optional
+            Whether the exchange should persist after broker restart, by default True.
+
+        Returns
+        -------
+        aio_pika.abc.AbstractExchange
+            The declared topic exchange.
+        """
+        if self.channel is None:
+            logger.debug("Channel not established, connecting...")
+            await self.aconnect()
+
+        if self.channel is None:
+            raise RuntimeError("[-] Failed to establish channel connection")
+
+        try:
+            exchange = await self.channel.declare_exchange(
+                topic_name, aio_pika.ExchangeType.TOPIC, durable=durable
+            )
+            logger.debug(f"Topic exchange '{topic_name}' ensured")
+            return exchange
+
+        except aio_pika.exceptions.AMQPException as e:
+            logger.error(f"Failed to declare topic exchange '{topic_name}': {e}")
             raise
 
     @asynccontextmanager

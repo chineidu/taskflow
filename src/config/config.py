@@ -12,7 +12,10 @@ from src.schemas.types import PriorityEnum
 class QueueNames:
     task_queue: str = field(metadata={"description": "Name of the task queue"})
     result_queue: str = field(metadata={"description": "Name of the result queue"})
-    progress_queue: str = field(metadata={"description": "Name of the progress reporting queue"})
+
+@dataclass(slots=True, kw_only=True)
+class TopicNames:
+    progress_topic: str = field(metadata={"description": "Name of the progress reporting topic"})
 
 
 @dataclass(slots=True, kw_only=True)
@@ -45,6 +48,7 @@ class RabbitMQConfig:
     heartbeat: int = field(default=60, metadata={"description": "Heartbeat interval in seconds"})
     prefetch_count: int = field(default=5, metadata={"description": "Number of messages to prefetch"})
     queue_names: QueueNames = field(metadata={"description": "Names of the RabbitMQ queues"})
+    topic_names: TopicNames = field(metadata={"description": "Names of the RabbitMQ topics"})
     queue_priority: PriorityEnum = field(
         default=PriorityEnum.MEDIUM, metadata={"description": "Default priority level for the queues"}
     )

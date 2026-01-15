@@ -1,13 +1,16 @@
 """API routes for job submission and retrieval."""
 
+import json
 from typing import TYPE_CHECKING, Annotated, Any
 
+import aio_pika
 from aiocache.factory import Cache
-from fastapi import APIRouter, Depends, Path, Request, status
+from fastapi import APIRouter, Depends, Path, Request, WebSocket, status
 from fastapi.params import Query
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio.session import AsyncSession
+from starlette.websockets import WebSocketDisconnect
 
 from src import create_logger
 from src.api.core.cache import cached
@@ -17,8 +20,10 @@ from src.api.core.ratelimit import limiter
 from src.api.core.responses import MsgSpecJSONResponse
 from src.api.utilities import generate_idempotency_key
 from src.config import app_config
+from src.config.settings import app_settings
 from src.db.models import aget_db
 from src.db.repositories.task_repository import TaskRepository
+from src.rabbitmq.base import BaseRabbitMQ
 from src.schemas.db.models import TaskModelSchema
 from src.schemas.rabbitmq.base import SubmittedJobResult
 from src.schemas.routes.jobs import (
@@ -41,6 +46,7 @@ templates = Jinja2Templates(directory="src/api/templates")
 # Order of routes matters here due to FastAPI's routing mechanism
 # Routes with path parameters should be defined BEFORE more general routes
 # OR you can use APIRouter with different prefixes to avoid conflicts.
+# Also note that POST endpoints should not be cached.
 
 
 @router.post("/jobs", status_code=status.HTTP_200_OK)
@@ -160,7 +166,6 @@ async def get_all_jobs(
 
 
 @router.post("/jobs/action/retry", status_code=status.HTTP_200_OK)
-@cached(ttl=300, key_prefix="job")  # type: ignore
 @limiter.limit(f"{LIMIT_VALUE}/minute")
 async def retry_batch_jobs(
     request: Request,  # Required by SlowAPI  # noqa: ARG001
@@ -170,7 +175,6 @@ async def retry_batch_jobs(
     max_messages: Annotated[int, Query(description="Maximum number of messages to search through")] = 1000,
 ) -> dict[str, Any]:
     """Route for retrying batch jobs from the Dead Letter Queue (DLQ) by task ID."""
-    # Use database-level pagination for better performance
     result = await areplay_dlq_messages(
         dlq_name="task_queue_dlq",
         target_queue_name=target_queue_name,
@@ -185,7 +189,6 @@ async def retry_batch_jobs(
 
 
 @router.post("/jobs/action/{task_id}/retry", status_code=status.HTTP_200_OK)
-@cached(ttl=300, key_prefix="job")  # type: ignore
 @limiter.limit(f"{LIMIT_VALUE}/minute")
 async def retry_job(
     request: Request,  # Required by SlowAPI  # noqa: ARG001
@@ -236,10 +239,13 @@ async def get_job(
 
 
 @router.get("/jobs/{task_id}/status-fragment", status_code=status.HTTP_200_OK)
+@cached(ttl=300, key_prefix="job")  # type: ignore
+@limiter.limit(f"{LIMIT_VALUE}/minute")
 async def get_task_status_fragment(
     request: Request,  # Required by SlowAPI  # noqa: ARG001
     task_id: Annotated[str, Path(description="The ID of the task to retrieve status fragment for.")],
     db: AsyncSession = Depends(aget_db),
+    cache: Cache = Depends(get_cache),  # Required by caching decorator  # noqa: ARG001
 ) -> HTMLResponse:
     """Route for fetching a lightweight status fragment of a task."""
     task_repo = TaskRepository(db=db)
@@ -258,7 +264,75 @@ async def get_task_status_fragment(
     )
 
 
-@router.get("/jobs/view/demo", response_class=HTMLResponse, status_code=status.HTTP_200_OK)
-async def render_demo_page(request: Request) -> HTMLResponse:
+@router.get("/jobs/view/demo", status_code=status.HTTP_200_OK)
+@cached(ttl=300, key_prefix="job")  # type: ignore
+async def render_demo_page(
+    request: Request,  # Required by SlowAPI  # noqa: ARG001
+    cache: Cache = Depends(get_cache),  # Required by caching decorator  # noqa: ARG001
+) -> HTMLResponse:
     """Serves the main HTMX jobs page."""
     return templates.TemplateResponse("jobs.html", {"request": request})
+
+
+@router.websocket("/jobs/{task_id}/status")
+async def stream_task_updates(websocket: WebSocket, task_id: str) -> None:
+    """WebSocket endpoint to stream real-time task status updates."""
+    # Accept the incoming WebSocket connection from the client
+    await websocket.accept()
+    logger.info(f"[+] WebSocket connected for task_id={task_id}")
+
+    # Create RabbitMQ connection
+    rmq_object = BaseRabbitMQ(config=app_config, url=app_settings.rabbitmq_url)
+    await rmq_object.aconnect()
+    if not rmq_object.connection:
+        logger.error("[x] RabbitMQ connection failed for WebSocket streaming")
+        await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+        return
+
+    try:
+        channel = await rmq_object.connection.channel()
+        # Declare or ensure the topic exchange where progress events are published.
+        # We use a topic exchange so we can bind using routing key patterns.
+        exchange = await channel.declare_exchange(
+            name=app_config.rabbitmq_config.topic_names.progress_topic,
+            type=aio_pika.ExchangeType.TOPIC,
+            durable=True,
+            auto_delete=False,
+        )
+        
+        # Create a temporary, exclusive queue for this WebSocket connection.
+        # Exclusive means the queue is deleted when this consumer disconnects.
+        queue = await channel.declare_queue(exclusive=True)
+
+        # Bind the queue to the exchange using a routing key pattern that matches
+        # all event types for the specific task id (e.g. task.progress.<id>).
+        # Pattern "*.*.{task_id}" assumes routing keys like "task.created.<id>".
+        await queue.bind(exchange, routing_key=f"*.*.{task_id}")
+        logger.info(f"[+] WebSocket subscribed to task updates: {task_id}")
+
+        # Use the queue iterator to asynchronously consume messages as they arrive.
+        async with queue.iterator() as queue_iter:
+            async for message in queue_iter:
+                # Use message.process() to properly ack/nack messages automatically.
+                # For more control, remove the 'async with message.process()' block.
+                # and manually call message.ack() or message.nack() as needed.
+                async with message.process():
+                    # Decode the message body and send it to the WebSocket client.
+                    event_data = json.loads(message.body.decode())
+                    await websocket.send_json(event_data)
+                    
+                    # If the task has reached a terminal state, stop streaming.
+                    # This returns from the endpoint, which will trigger cleanup.
+                    if event_data.get("status") in ["completed", "failed"]:
+                        logger.info(f"[+] Task {event_data.get('status')}: {task_id}")
+                        return
+
+    except WebSocketDisconnect:
+        logger.info(f"[x] WebSocket disconnected: {task_id}")
+    except Exception as e:
+        logger.error(f"[x] Unexpected WebSocket error for {task_id}: {e}", exc_info=True)
+        await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+    finally:
+        # Cleanup: Close WebSocket and RabbitMQ connection
+        await websocket.close(code=status.WS_1000_NORMAL_CLOSURE)
+        await rmq_object.adisconnect()

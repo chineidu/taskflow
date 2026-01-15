@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
+import aio_pika
 from sqlalchemy.exc import DatabaseError
 
 from src import add_file_handler, create_logger
@@ -98,7 +99,7 @@ class RabbitMQConsumer(BaseRabbitMQ):
             base_delay=1.0,
             raise_on_failure=False,  # Not critical to fail the task if logs can't be uploaded
         )
-        progress_queue_name = app_config.rabbitmq_config.queue_names.progress_queue
+        progress_topic_name = app_config.rabbitmq_config.topic_names.progress_topic
         priority = app_config.rabbitmq_config.queue_priority
         priority_int = map_priority_enum_to_int(priority)
 
@@ -137,14 +138,7 @@ class RabbitMQConsumer(BaseRabbitMQ):
             ttl_ms=self.config.rabbitmq_config.dlq_config.ttl,
         )
         # Progress queue
-        await self.aensure_queue(
-            queue_name=progress_queue_name,
-            arguments=QueueArguments(
-                x_dead_letter_exchange=None,
-                x_max_priority=priority_int,
-            ),
-            durable=True,
-        )
+        progress_exchange = await self.aensure_topic(topic_name=progress_topic_name, durable=True)
 
         logger.info(f"[+] Starting to consume from queue: '{queue_name}'")
 
@@ -170,18 +164,29 @@ class RabbitMQConsumer(BaseRabbitMQ):
                     _task_id: str = task_id,
                     _correlation_id: str = correlation_id,
                 ) -> None:
-                    """Report task progress by publishing progress updates."""
-                    await producer.apublish(
-                        message={
-                            "task_id": _task_id,
-                            "correlation_id": _correlation_id,
-                            "progress": percentage,
-                            "status": "processing",
-                        },
-                        queue_name=progress_queue_name,
-                        priority=PriorityEnum.HIGH,
-                        headers={"event_type": TaskEventTypeEnum.TASK_PROGRESS},
+                    """Report task progress by publishing progress updates to the progress exchange."""
+                    event_data = {
+                        "task_id": _task_id,
+                        "correlation_id": _correlation_id,
+                        "progress": percentage,
+                        "status": "processing",
+                    }
+                    event_msg = aio_pika.Message(
+                        body=json.dumps(event_data).encode(),
+                        content_type="application/json",
+                        priority=map_priority_enum_to_int(priority),
+                        correlation_id=_correlation_id,
+                        headers={"task_id": _task_id, "event_type": TaskEventTypeEnum.TASK_PROGRESS},
                     )
+                    try:
+                        await progress_exchange.publish(
+                            message=event_msg,
+                            routing_key=f"{TaskEventTypeEnum.TASK_PROGRESS}.{_task_id}",
+                        )
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to publish progress event for task {_task_id}: {e}", exc_info=True
+                        )
 
                 def progress_reporter(
                     percentage: int,
@@ -218,26 +223,41 @@ class RabbitMQConsumer(BaseRabbitMQ):
                     _correlation_id: str = correlation_id,
                 ) -> None:
                     """Publish task events such as failure or completion, etc."""
+                    routing_key: str = (
+                        f"{event_type if isinstance(event_type, str) else event_type.value}.{_task_id}"
+                    )
                     event_data: dict[str, Any] = {
                         "task_id": _task_id,
                         "correlation_id": _correlation_id,
                         "status": status if isinstance(status, str) else status.value,
                         "timestamp": datetime.now().isoformat(),
                     }
+
                     if message:
                         event_data["message"] = message
                     if error:
                         event_data["error"] = error
 
-                    await producer.apublish(
-                        message=event_data,
-                        queue_name=progress_queue_name,
-                        priority=PriorityEnum.HIGH,
-                        request_id=_correlation_id,
+                    event_msg = aio_pika.Message(
+                        body=json.dumps(event_data).encode(),
+                        content_type="application/json",
+                        priority=map_priority_enum_to_int(priority),
+                        correlation_id=_correlation_id,
                         headers={
-                            "event_type": event_type if isinstance(event_type, str) else event_type.value
+                            "task_id": _task_id,
+                            "event_type": event_type if isinstance(event_type, str) else event_type.value,
                         },
                     )
+
+                    try:
+                        await progress_exchange.publish(
+                            message=event_msg,
+                            routing_key=(routing_key),
+                        )
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to publish {event_type} event for task {_task_id}: {e}", exc_info=True
+                        )
 
                 # ----------- Begin Processing Logic -----------
                 msg = (
@@ -245,13 +265,17 @@ class RabbitMQConsumer(BaseRabbitMQ):
                     f"| time={timestamp} | retry_count={retry_count}"
                 )
                 logger.info(msg)
-                await apublish_task_event(
-                    event_type=TaskEventTypeEnum.TASK_CREATED,
-                    status=TaskStatusEnum.IN_PROGRESS,
-                    message=msg,
-                    _task_id=task_id,
-                    _correlation_id=correlation_id,
-                )
+
+                try:
+                    await apublish_task_event(
+                        event_type=TaskEventTypeEnum.TASK_CREATED,
+                        status=TaskStatusEnum.IN_PROGRESS,
+                        message=msg,
+                        _task_id=task_id,
+                        _correlation_id=correlation_id,
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to publish TASK_CREATED event: {e}", exc_info=True)
 
                 # --------------- Circuit Breaker Check ---------------
                 # If circuit breaker is OPEN, route message to delay queue without processing
