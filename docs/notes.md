@@ -141,6 +141,13 @@ Internally, `dataclasses` with `slots=True` are used to avoid the "validation ta
 
 ### Dead-Letter Queue (DLQ)
 
+- Dead letter queue is a secondary queue that holds messages that cannot be processed successfully after a certain number of attempts.
+- Retriable (transient errors) messages are retried a configurable number of times before being sent to the DLQ.
+- Poison messages (non-retriable errors) or logic errors are sent directly to the DLQ without retries.
+
+---
+---
+
 - **Decision**: Added DLQ for messages exceeding retry limits.
 - **Rationale**:
   - Preserves undeliverable messages for inspection.
