@@ -320,7 +320,7 @@ except (ConnectionError, DatabaseError) as infra_error:
 
 **Why not cache 404s?**
 
-```
+```txt
 Timeline:
 T0: Client submits job → returns task_id immediately
 T1: Client GETs task_id → Cache miss, DB returns 404, cache it
@@ -334,7 +334,7 @@ This "Creation Lag" violates user expectations of immediate visibility.
 #### Trade-offs
 
 | ✅ Benefits | ⚠️ Costs |
-|------------|----------|
+| ------------ | ---------- |
 | Reduced DB load by 70% | Increased complexity |
 | Sub-10ms response times | Redis dependency |
 | Scales horizontally | Cache invalidation logic |
@@ -393,7 +393,7 @@ Initially considered storing execution logs directly in PostgreSQL `TEXT` column
 **Why not store in PostgreSQL?**
 
 | Issue | Impact |
-|-------|--------|
+| ------- | -------- |
 | **Database Bloat** | TEXT columns degrade index performance |
 | **VACUUM Overhead** | Extra work to reclaim storage |
 | **Scalability** | Database size grows linearly with logs |
@@ -401,7 +401,7 @@ Initially considered storing execution logs directly in PostgreSQL `TEXT` column
 
 #### Architecture
 
-```
+```txt
 Worker → [Temp File] → S3 Upload → DB stores S3 key/URL only
                                           ↓
                                    API streams from S3
@@ -448,7 +448,7 @@ Implemented **WebSocket-based event streaming** using RabbitMQ topic exchanges f
 
 #### Architecture
 
-```
+```txt
 ┌─────────────┐         ┌──────────────────┐         ┌─────────────────┐
 │   Client    │         │   API Server     │         │  RabbitMQ       │
 │             │         │   (WebSocket)    │         │  Topic Exchange │
@@ -528,7 +528,7 @@ async with queue.iterator() as queue_iter:
 
 Events are published with hierarchical routing keys:
 
-```
+```txt
 task.created.{task_id}
 task.started.{task_id}
 task.progress.{task_id}
@@ -587,7 +587,7 @@ async def publish_progress(task_id: str, progress: int):
 #### Benefits
 
 | ✅ Benefits | Details |
-|------------|---------|
+| ------------ | --------- |
 | **Real-time updates** | Sub-second latency (vs 1-5s polling) |
 | **Reduced DB load** | No polling queries (90%+ reduction) |
 | **Better UX** | Instant progress feedback |
@@ -598,7 +598,7 @@ async def publish_progress(task_id: str, progress: int):
 #### Trade-offs
 
 | ⚠️ Costs | Mitigation |
-|---------|------------|
+| --------- | ------------ |
 | **Connection overhead** | WebSocket keepalive + auto-reconnect |
 | **Race condition risk** | Connect WebSocket BEFORE submitting job |
 | **Exchange complexity** | Clear documentation + monitoring |
@@ -626,7 +626,7 @@ async with websockets.connect(f"ws://api/jobs/{task_id}/status") as ws:
 #### Alternatives Considered
 
 | Alternative | Why Rejected |
-|-------------|-------------|
+| ------------- | ------------- |
 | **Server-Sent Events (SSE)** | One-way only, no bidirectional support |
 | **Long polling** | Higher latency, more server resources |
 | **Direct queue consumption** | Destructive, steals jobs from workers |
@@ -717,7 +717,7 @@ await channel.declare_queue("dead_letter_queue")
 
 #### Architecture
 
-```
+```txt
 [task_queue] → (failure) → [delay_queue (TTL=30s)] → (expires) → [task_queue]
                                                                         ↓
                                                             (max retries exceeded)
@@ -891,7 +891,7 @@ Implemented circuit breaker for infrastructure dependencies (DB, message broker,
 
 #### State Machine
 
-```
+```txt
 CLOSED (normal) ──[failure_threshold exceeded]──> OPEN (failing fast)
      ↑                                               │
      │                                               │
@@ -913,7 +913,7 @@ CircuitBreaker(
 #### When to Use
 
 | ✅ Use Circuit Breaker | ❌ Don't Use Circuit Breaker |
-|-----------------------|----------------------------|
+| ----------------------- | ---------------------------- |
 | External HTTP APIs | Business logic validation |
 | Database connections | Input parsing errors |
 | Message broker calls | Authorization checks |
@@ -949,7 +949,7 @@ await producer.publish(
 #### Trade-offs
 
 | ✅ Benefits | ⚠️ Risks |
-|------------|----------|
+| ------------ | ---------- |
 | Critical tasks processed first | Low-priority starvation possible |
 | Improved SLA for urgent jobs | Increased queue management complexity |
 | Business flexibility | Requires monitoring |
@@ -1017,12 +1017,6 @@ async def test_worker_crash_mid_execution():
 |------|---------|--------|
 | 2026-01-15 | ADR-011 | Added WebSocket real-time monitoring |
 | 2024-Q4 | All | Initial document creation |
-
-### Related Documents
-
-- [API Documentation](./api-docs.md)
-- [Deployment Guide](./deployment.md)
-- [Monitoring Runbook](./monitoring.md)
 
 ---
 
