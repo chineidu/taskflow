@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
+from fastapi import Request
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -76,8 +77,19 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[TestClient, None]:
         mock_cache.set = AsyncMock()
         return mock_cache
 
+    # Override RabbitMQ producer dependency
+    from src.api.core.dependencies import get_producer
+
+    mock_producer = MagicMock()
+    mock_producer.apublish = AsyncMock(return_value=(True, "task-123"))
+    mock_producer.abatch_publish = AsyncMock(return_value=(1, ["task-123"]))
+
+    def override_get_producer(request: Request) -> MagicMock:  # noqa: ARG001
+        return mock_producer
+
     test_app.dependency_overrides[aget_db] = override_get_db
     test_app.dependency_overrides[get_cache] = override_get_cache
+    test_app.dependency_overrides[get_producer] = override_get_producer
 
     # Include routers
     test_app.include_router(health.router, prefix=prefix)

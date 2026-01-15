@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models import DBTask
-from src.schemas.db.models import TaskModel
+from src.schemas.db.models import TaskModelSchema
 from src.schemas.rabbitmq.base import SubmittedJobResult
 from src.schemas.types import TaskStatusEnum
 
@@ -50,11 +50,12 @@ class TestClientJobRoutes:
         # Insert a task
         task_id = "status-test-task"
         task = DBTask(
-            **TaskModel(
+            **TaskModelSchema(
                 task_id=task_id,
                 payload={"data": "test"},
                 status=TaskStatusEnum.IN_PROGRESS,
                 has_logs=False,
+                idempotency_key="status-test-key",
             ).model_dump()
         )
         db_session.add(task)
@@ -82,13 +83,14 @@ class TestClientLogRoutes:
         # Insert a task with logs
         task_id = "log-test-task"
         task = DBTask(
-            **TaskModel(
+            **TaskModelSchema(
                 task_id=task_id,
                 payload={"data": "test"},
                 status=TaskStatusEnum.COMPLETED,
                 has_logs=True,
                 log_s3_key="logs/test.log",
                 log_s3_url="s3://bucket/logs/test.log",
+                idempotency_key="log-test-key",
             ).model_dump()
         )
         db_session.add(task)
@@ -133,11 +135,12 @@ class TestClientLogRoutes:
         # Insert a task without logs
         task_id = "no-log-task"
         task = DBTask(
-            **TaskModel(
+            **TaskModelSchema(
                 task_id=task_id,
                 payload={"data": "test"},
                 status=TaskStatusEnum.PENDING,
                 has_logs=False,
+                idempotency_key="no-log-key",
             ).model_dump()
         )
         db_session.add(task)

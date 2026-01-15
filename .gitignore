@@ -216,6 +216,6 @@ __marimo__/
 logs/
 **/**/*.ipynb
 **/**/.vscode/
-**/**/note.*
+**/**/note*.*
 **/**/.env.sandbox
 **/**/.env.staging

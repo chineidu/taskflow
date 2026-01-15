@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import (
 
 from src.db.models import DBTask
 from src.db.repositories.task_repository import TaskRepository
-from src.schemas.db.models import TaskModel
+from src.schemas.db.models import TaskModelSchema
 from src.schemas.types import TaskStatusEnum
 
 
@@ -22,11 +22,12 @@ class TestTaskRepository:
 
         # Create and add a test task
         test_task = DBTask(
-            **TaskModel(
+            **TaskModelSchema(
                 task_id="test123",
                 payload={"key": "value"},
                 status=TaskStatusEnum.PENDING,
                 has_logs=False,
+                idempotency_key="test-key",
                 log_s3_key=None,
                 log_s3_url=None,
             ).model_dump()
@@ -50,11 +51,12 @@ class TestTaskRepository:
 
         for tid in task_ids:
             task = DBTask(
-                **TaskModel(
+                **TaskModelSchema(
                     task_id=tid,
                     payload={"id": tid},
                     status=TaskStatusEnum.PENDING,
                     has_logs=False,
+                    idempotency_key=f"{tid}-key",
                 ).model_dump()
             )
             db_session.add(task)
@@ -80,11 +82,12 @@ class TestTaskRepository:
 
         for tid, status in tasks_data:
             task = DBTask(
-                **TaskModel(
+                **TaskModelSchema(
                     task_id=tid,
                     payload={},
                     status=status,
                     has_logs=False,
+                    idempotency_key=f"{tid}-key",
                 ).model_dump()
             )
             db_session.add(task)
@@ -102,11 +105,12 @@ class TestTaskRepository:
         # Given
         task_repo = TaskRepository(db_session)
         new_tasks = [
-            TaskModel(
+            TaskModelSchema(
                 task_id=f"new_task_{i}",
                 payload={"i": i},
                 status=TaskStatusEnum.PENDING,
                 has_logs=False,
+                idempotency_key=f"new_task_{i}-key",
             )
             for i in range(3)
         ]
@@ -125,11 +129,12 @@ class TestTaskRepository:
         task_id = "status_update_test"
 
         task = DBTask(
-            **TaskModel(
+            **TaskModelSchema(
                 task_id=task_id,
                 payload={},
                 status=TaskStatusEnum.PENDING,
                 has_logs=False,
+                idempotency_key="status-update-key",
             ).model_dump()
         )
         db_session.add(task)
@@ -161,11 +166,12 @@ class TestTaskRepository:
         task_id = "log_test"
 
         task = DBTask(
-            **TaskModel(
+            **TaskModelSchema(
                 task_id=task_id,
                 payload={},
                 status=TaskStatusEnum.COMPLETED,
                 has_logs=False,
+                idempotency_key="log-test-key",
             ).model_dump()
         )
         db_session.add(task)
@@ -201,13 +207,14 @@ class TestTaskRepository:
 
         # Create and add a test task
         test_task = DBTask(
-            **TaskModel(
+            **TaskModelSchema(
                 task_id="task1",
                 payload={"key": "value1"},
                 status=TaskStatusEnum.PENDING,
                 has_logs=False,
                 log_s3_key=None,
                 log_s3_url=None,
+                idempotency_key="task1-key",
             ).model_dump()
         )
         db_session.add(test_task)
