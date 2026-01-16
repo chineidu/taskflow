@@ -181,7 +181,7 @@ class DevelopmentConfig(BaseConfig):
         str_strip_whitespace=True,
     )
 
-    ENVIRONMENT: EnvironmentEnum = EnvironmentEnum.DEVELOPMENT
+    ENV: EnvironmentEnum = EnvironmentEnum.DEVELOPMENT
     WORKERS: int = 1
     LIMIT_VALUE: int = 20
     RELOAD: bool = True
