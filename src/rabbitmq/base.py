@@ -44,12 +44,12 @@ class BaseRabbitMQ:
     async def aconnect(self) -> None:
         """Establish connection to RabbitMQ."""
         # Fast path: already connected
-        if self.connection is not None and not self.connection.is_closed:
+        if await self._is_connected():
             return
 
         # If multiple coroutines try to connect simultaneously, ensure only one does the work
         async with self._lock:
-            if self.connection is not None and not self.connection.is_closed:
+            if await self._is_connected():
                 return
 
             # Connect with retries (if not already connected)
